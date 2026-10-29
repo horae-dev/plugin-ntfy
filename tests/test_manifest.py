@@ -61,3 +61,15 @@ def test_main_prints_the_manifest(capsys: pytest.CaptureFixture[str]) -> None:
 def test_main_refuses_unknown_arguments() -> None:
     with pytest.raises(SystemExit, match="usage"):
         main(["--nope"])
+
+
+def test_permissions_are_the_least_the_notifier_needs() -> None:
+    """Applies `notify.push` (never proposes), reaches the default server `ntfy.sh` (a
+    self-hosted host is approved in horae.lock), reads one secret, touches no file."""
+    document = on_disk()
+    assert document["provides"] == {"notifiers": ["ntfy.push"]}
+    assert document["permissions"] == {
+        "intents": ["notify.push"],
+        "network": ["ntfy.sh"],
+        "secrets": ["NTFY_TOKEN"],
+    }

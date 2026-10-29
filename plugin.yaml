@@ -3,15 +3,20 @@
 # interpreter that has this package (horae-sdk README, "The command").
 name: ntfy
 version: 0.1.0
-horae: '>=0'
-description: Proposes a task to reply to each message of a folder.
+horae: '>=0,<0.2'
+description: Sends Horae notifications through ntfy, with priorities and quiet hours.
 license: Apache-2.0
+homepage: https://github.com/horae-dev/plugin-ntfy
 provides:
-  sources:
-  - ntfy.inbox
+  notifiers:
+  - ntfy.push
 permissions:
+  network:
+  - ntfy.sh
+  secrets:
+  - NTFY_TOKEN
   intents:
-  - task.create
+  - notify.push
 runtime:
   protocol: mcp-stdio
   command:

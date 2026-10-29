@@ -1,13 +1,15 @@
 [project]
 name = "horae-plugin-ntfy"
 version = "0.1.0"
-description = "The ntfy Horae plugin: one source that proposes a task per message."
+description = "The ntfy Horae plugin: a notify.push notifier with priorities and quiet hours."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "horae-sdk>=0.1,<0.2",
+    "httpx2>=2.16,<3",
+    "tzdata>=2026.5",
 ]
 
 [build-system]
