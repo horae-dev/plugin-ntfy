@@ -1,0 +1,33 @@
+{
+  "tool": "ntfy.inbox",
+  "params": {
+    "folder": "inbox"
+  },
+  "expect": {
+    "data": {
+      "folder": "inbox",
+      "messages": [
+        {
+          "id": "m-1",
+          "subject": "Quarterly report draft"
+        },
+        {
+          "id": "m-2",
+          "subject": "Lunch on Friday?"
+        }
+      ]
+    },
+    "intents": [
+      {
+        "type": "task.create",
+        "title": "Reply to Quarterly report draft",
+        "fingerprint": "ntfy:reply:m-1"
+      },
+      {
+        "type": "task.create",
+        "title": "Reply to Lunch on Friday?",
+        "fingerprint": "ntfy:reply:m-2"
+      }
+    ]
+  }
+}
