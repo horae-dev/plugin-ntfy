@@ -20,6 +20,7 @@ from fakes import (
     env,
     lan_notifier,
     recorded_notifier,
+    state_paths,
 )
 from horae_ntfy.message import sequence_id
 from horae_ntfy.plugin import NtfyNotifier
@@ -32,7 +33,7 @@ MORNING = datetime(2026, 10, 30, 6, 0, tzinfo=UTC)
 
 def request(params: dict[str, Any], **intent: Any) -> ApplyRequest:
     return ApplyRequest(
-        Paths(),
+        state_paths(),
         {"type": "notify.push", "title": "Today", "body": "3 tasks due", "link": None, **intent},
         tool="ntfy.push",
         params=params,
@@ -265,7 +266,9 @@ def test_the_same_dedupe_key_sends_the_same_sequence_id() -> None:
 
     async def other() -> None:
         intent = {"type": "notify.push", "body": "x", "link": None}
-        call = ApplyRequest(Paths(), intent, tool="ntfy.push", params=params, dedupe_key="a" * 64)
+        call = ApplyRequest(
+            state_paths(), intent, tool="ntfy.push", params=params, dedupe_key="a" * 64
+        )
         await notifier.apply(call)
 
     anyio.run(other)
@@ -306,10 +309,8 @@ def test_a_critical_push_ignores_quiet_hours(ntfy: FakeNtfy, during: str) -> Non
 
 def test_a_critical_push_needs_no_time_zone(ntfy: FakeNtfy) -> None:
     environ = {"NTFY_TOKEN": TOKEN}
-    apply(
-        lan_notifier(now=LATE, environ=environ),
-        {"server": ntfy.url, "topic": "t", "priority": "critical", "quiet_hours": NIGHT},
-    )
+    params = {"server": ntfy.url, "topic": "t", "priority": "critical", "quiet_hours": NIGHT}
+    apply(lan_notifier(now=LATE, environ=environ), {**params, "dedupe": "off"})
     assert len(ntfy.seen) == 1
 
 

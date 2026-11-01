@@ -26,26 +26,34 @@ instance time zone, `TZ`), a push that is not `critical` is:
   ahead), not an absolute time: the server counts it on its own clock, so a skew between
   the two clocks shifts the delivery a little instead of making ntfy refuse a time it
   thinks is too close or past. A 400 to a scheduled publish is `delay_refused`: the push is
-  never re-sent at once, which would wake the phone. Nothing is kept in the plugin: the
+  never re-sent at once, which would wake the phone. The message is not kept here: the
   server holds the message, in its message cache (a self-hosted server needs a persistent
   `cache-file` or database, or a restart loses the scheduled messages);
-- `during: drop`: not sent at all.
+- `during: drop`: not sent at all (nor recorded in the reminder state).
 
 Either way `apply` succeeds, so the core records the notification as handled and will not
 send that `dedupe_key` again. A `critical` push is always sent at once.
 
+**Once per rule and day.** With `dedupe: daily` (the default) a push whose rule (the entry and
+the intent's text) was already handed to ntfy for the same local day of delivery is not sent
+again (`delivery: duplicate`), whatever its `dedupe_key`: the core gives a pipeline without an
+LLM step a new key every run. `horae_ntfy.state` keeps that record in the plugin's approved
+`paths.write` directory.
+
 **What `apply` returns** (`Applied`): the target `<server>/<topic>` and `details`
-(`delivery`: `sent`, `delayed` or `dropped`; `priority`; the ntfy message `id` when the
+(`delivery`: `sent`, `delayed`, `dropped` or `duplicate`; `priority`; the ntfy message `id` when the
 server gave one; `until`, the UTC time a delayed push is due by this host's clock; `click:
-"dropped"` when the intent's `obsidian://` link was not sent, until story #4). Nothing in it
+"dropped"` when the intent's `obsidian://` link was not sent, until story #4; `state`:
+`reset` or `not_saved` when the reminder state was started over or not written). Nothing in it
 comes from the proposer's text, and the token is never in it.
 """
 
 import math
 import os
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from horae_sdk import Applied, ApplyRequest, Notifier, Paths, Permissions, Plugin, SinkError
 
@@ -53,6 +61,7 @@ from horae_ntfy.http import Publisher
 from horae_ntfy.message import is_obsidian, payload
 from horae_ntfy.quiet import is_quiet, quiet_until, zone_from_env
 from horae_ntfy.settings import DEFAULT_SERVER, TOKEN_SECRET, Settings, parse
+from horae_ntfy.state import LOCK_TIMEOUT_S, SentState, rule_fingerprint, sent_key, state_dir
 
 NAME = "ntfy"
 """The plugin's name, also the namespace of its refs (`ntfy.push`)."""
@@ -80,9 +89,15 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def _local_day(delivery: datetime, zone: ZoneInfo) -> date:
+    """The local date (instance zone) a push reaches the phone at `delivery` (UTC)."""
+    return delivery.astimezone(zone).date()
+
+
 class NtfyNotifier(Notifier):
     """`ntfy.push`. `publisher`, `now` and `env` are seams for tests (a fake server's
-    transport, a fake clock, a fake environment)."""
+    transport, a fake clock, a fake environment); `state_lock_timeout_s` bounds the wait for
+    another run holding the reminder state."""
 
     def __init__(
         self,
@@ -90,8 +105,10 @@ class NtfyNotifier(Notifier):
         *,
         now: Clock = utc_now,
         env: Mapping[str, str] | None = None,
+        state_lock_timeout_s: float = LOCK_TIMEOUT_S,
     ) -> None:
         super().__init__([TOOL])
+        self.state_lock_timeout_s = state_lock_timeout_s
         self.publisher = publisher or Publisher()
         self._now = now
         self._env = env
@@ -122,9 +139,9 @@ class NtfyNotifier(Notifier):
         delay_until: datetime | None = None
         delay_s: int | None = None
         window = settings.quiet_hours
+        now = self._now().astimezone(UTC)
         if window is not None and not settings.critical:
             zone = zone_from_env(self._environ())
-            now = self._now().astimezone(UTC)
             if is_quiet(now, window, zone):
                 delay_until = max(quiet_until(now, window, zone), now + MIN_DELAY)
                 delay_s = math.ceil((delay_until - now).total_seconds())
@@ -134,13 +151,41 @@ class NtfyNotifier(Notifier):
         if is_obsidian(request.intent.get("link")):
             details["click"] = "dropped"
         if details["delivery"] == "dropped":
+            return Applied(target, details=details)  # nothing pushed, nothing recorded
+        if settings.dedupe == "off":
+            await self._publish(settings, message, token, details, delay_until)
             return Applied(target, details=details)
+        # Once per rule and local day of delivery (`horae_ntfy.state`).
+        state = SentState(state_dir(request.paths), lock_timeout_s=self.state_lock_timeout_s)
+        zone = zone_from_env(self._environ())
+        day = _local_day(delay_until or now, zone)
+        key = sent_key(rule_fingerprint(settings, request.intent), day)
+        async with state.locked() as sent:
+            if sent.reset:
+                details["state"] = "reset"
+            if key in sent.entries:
+                return Applied(target, details={**details, "delivery": "duplicate"})
+            await self._publish(settings, message, token, details, delay_until)
+            sent.entries[key] = now.replace(microsecond=0).isoformat()
+            try:
+                state.save(sent, now.astimezone(zone).date())
+            except OSError:
+                details["state"] = "not_saved"  # pushed: the core must still record it
+        return Applied(target, details=details)
+
+    async def _publish(
+        self,
+        settings: Settings,
+        message: dict[str, Any],
+        token: str | None,
+        details: dict[str, Any],
+        delay_until: datetime | None,
+    ) -> None:
         message_id = await self.publisher.publish(settings, message, token)
         if message_id is not None:
             details["id"] = message_id
         if delay_until is not None:
             details["until"] = delay_until.replace(microsecond=0).isoformat()
-        return Applied(target, details=details)
 
 
 def build(notifier: NtfyNotifier | None = None) -> Plugin:

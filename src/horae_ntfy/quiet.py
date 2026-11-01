@@ -37,7 +37,7 @@ def zone_from_env(env: Mapping[str, str] | None = None) -> ZoneInfo:
     """The instance time zone from `TZ` (an IANA name; a leading `:` is allowed)."""
     name = (os.environ if env is None else env).get("TZ", "").removeprefix(":")
     if not name:
-        raise SinkError("config_invalid", "quiet_hours need TZ (the instance time zone)")
+        raise SinkError("config_invalid", "quiet_hours and dedupe need TZ (the instance time zone)")
     try:
         return ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError):

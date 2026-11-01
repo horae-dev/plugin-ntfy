@@ -6,8 +6,11 @@ notifier reaches it through the `http://` LAN path with a fake resolver that ans
 127.0.0.1 for the synthetic host `ntfy.example.org`. The token is a synthetic value.
 """
 
+import atexit
 import contextlib
 import json
+import shutil
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -17,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import httpx2
+from horae_sdk import Paths
 
 from horae_ntfy.http import Publisher
 from horae_ntfy.plugin import NtfyNotifier
@@ -25,6 +29,13 @@ from horae_ntfy.settings import Settings
 TOKEN = "tk_synthetictesttoken0123456789ab"  # noqa: S105 - a fake token, for tests only
 HOST = "ntfy.example.org"
 FIXED_NOW = datetime(2026, 10, 29, 12, 0, tzinfo=UTC)
+_STATE_ROOT = tempfile.mkdtemp(prefix="horae-ntfy-tests-")
+atexit.register(shutil.rmtree, _STATE_ROOT, True)
+
+
+def state_paths() -> Paths:
+    """A fresh, empty reminder state directory, approved as the plugin's `paths.write`."""
+    return Paths(write=(tempfile.mkdtemp(dir=_STATE_ROOT),))
 
 
 @dataclass

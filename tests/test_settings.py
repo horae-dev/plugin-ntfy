@@ -22,6 +22,7 @@ def test_defaults() -> None:
     assert settings.auth == "none"
     assert settings.quiet_hours is None
     assert settings.link_prefix is None
+    assert settings.dedupe == "daily"
     assert not settings.critical
 
 
@@ -35,8 +36,10 @@ def test_everything_set() -> None:
             "auth": "none",
             "quiet_hours": {"start": "22:30", "end": "06:45", "during": "drop"},
             "link_prefix": "https://notes.example.org/daily/",
+            "dedupe": "off",
         }
     )
+    assert settings.dedupe == "off"
     assert settings.server == "https://ntfy.example.org:8443"
     assert settings.critical
     assert settings.ntfy_priority == 5
@@ -138,6 +141,8 @@ def test_invalid_servers_are_refused(server: Any) -> None:
             },
             "quiet_hours.during",
         ),
+        ({**SERVER, "topic": "t", "dedupe": "hourly"}, "dedupe"),
+        ({**SERVER, "topic": "t", "dedupe": False}, "dedupe"),
     ],
 )
 def test_invalid_parameters_are_refused_by_name(params: dict[str, Any], name: str) -> None:

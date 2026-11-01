@@ -12,3 +12,10 @@ from fakes import FakeNtfy
 def ntfy() -> Iterator[FakeNtfy]:
     with FakeNtfy() as server:
         yield server
+
+
+@pytest.fixture(autouse=True)
+def instance_zone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The host always sets `TZ` (the instance zone) for a plugin; notifiers built on the
+    process environment get it too. Tests of a missing zone pass their own environment."""
+    monkeypatch.setenv("TZ", "Europe/Paris")
