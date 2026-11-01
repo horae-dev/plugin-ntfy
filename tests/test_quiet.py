@@ -143,3 +143,39 @@ def test_a_missing_or_unknown_zone_is_a_config_error(environ: dict[str, str]) ->
 def test_the_process_environment_is_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TZ", "Asia/Tokyo")
     assert zone_from_env() == ZoneInfo("Asia/Tokyo")
+
+
+def test_an_end_inside_the_fall_back_overlap_is_its_later_occurrence() -> None:
+    # Paris, 2026-10-25: 02:00-02:59 happens twice (CEST, then CET). Ending at the first 02:30
+    # would deliver at 02:30 CEST, then the clock goes back into the window until 02:30 CET.
+    window = QuietHours(time(1, 0), time(2, 30))
+    first_end = local(PARIS, 2026, 10, 25, 2, 30, fold=0)
+    later_end = local(PARIS, 2026, 10, 25, 2, 30, fold=1)
+    assert later_end.astimezone(UTC) == datetime(2026, 10, 25, 1, 30, tzinfo=UTC)
+    for now in (
+        local(PARIS, 2026, 10, 25, 1, 15),
+        local(PARIS, 2026, 10, 25, 2, 10, fold=0),
+        first_end,  # the stretch between the two 02:30s is quiet too
+        local(PARIS, 2026, 10, 25, 2, 45, fold=0),
+        local(PARIS, 2026, 10, 25, 2, 5, fold=1),
+    ):
+        assert is_quiet(now, window, PARIS), now
+        assert quiet_until(now, window, PARIS) == later_end.astimezone(UTC), now
+    assert not is_quiet(later_end, window, PARIS)
+    assert not is_quiet(local(PARIS, 2026, 10, 25, 2, 45, fold=1), window, PARIS)
+
+
+def test_an_end_at_the_start_of_the_overlap_is_not_extended() -> None:
+    # Ending at 02:00: the clock passes 02:00-02:59 twice but never re-enters 01:00-02:00.
+    window = QuietHours(time(1, 0), time(2, 0))
+    now = local(PARIS, 2026, 10, 25, 1, 30)
+    # Compared in UTC: PEP 495 makes an ambiguous local time unequal to any other zone's.
+    assert quiet_until(now, window, PARIS) == datetime(2026, 10, 25, 0, 0, tzinfo=UTC)
+    assert not is_quiet(local(PARIS, 2026, 10, 25, 2, 30, fold=0), window, PARIS)
+
+
+def test_an_end_in_the_overlap_on_an_ordinary_day_is_unchanged() -> None:
+    window = QuietHours(time(1, 0), time(2, 30))
+    now = local(PARIS, 2026, 10, 24, 1, 30)
+    assert quiet_until(now, window, PARIS) == local(PARIS, 2026, 10, 24, 2, 30)
+    assert not is_quiet(local(PARIS, 2026, 10, 24, 2, 45), window, PARIS)

@@ -14,14 +14,14 @@ Closes #<issue>
 - [ ] CI green: the **CI OK** check (lockfile, lint, types, tests + coverage, gitleaks)
 - [ ] `uv run pre-commit run --all-files` passes locally
 - [ ] `plugin.yaml` regenerated (`uv run python -m horae_ntfy --manifest > plugin.yaml`) if tools or permissions changed
-- [ ] Recordings in `tests/recordings/` are synthetic (no personal data, no secret) and their diff reviewed
+- [ ] Fixtures in `tests/fixtures/pushes.json` are synthetic (no personal data, no secret) and their diff reviewed
 - [ ] Commits carry `Graft-Agent`, `Graft-Model` and `Graft-Task` trailers
 
 ## Plugin authoring checklist
 
 <!-- Tick what applies. The link below is relative to the pull request page, so it also works in repositories made from this template. -->
 - [ ] Permissions: least privilege in `plugin.yaml`; every host, secret, path and intent justified below
-- [ ] Secrets: resolved from the declared environment, never logged or put in errors, intents or recordings
+- [ ] Secrets: resolved from the declared environment, never logged or put in errors, intents or fixtures
 - [ ] Untrusted input: titles only through `intents.task_create`, no free-form URLs in intents, sizes bounded
 - [ ] Fixtures: synthetic only, recorded locally (never in CI), with a hostile case
 - [ ] Degraded handling: expected failures raise `PluginError`, no failure hidden as empty data

@@ -32,7 +32,8 @@
           "tags": [
             "sunrise"
           ],
-          "click": "https://notes.example.org/daily/2026-10-29"
+          "click": "https://notes.example.org/daily/2026-10-29",
+          "sequence_id": "00000000000000000000000000000000"
         }
       },
       "result": {
@@ -78,7 +79,8 @@
           "tags": [
             "alarm_clock"
           ],
-          "delay": "1793340000"
+          "delay": "27000s",
+          "sequence_id": "00000000000000000000000000000000"
         }
       },
       "result": {
@@ -97,6 +99,7 @@
     "name": "reminder-dropped",
     "now": "2026-10-29T22:30:00+00:00",
     "params": {
+      "server": "https://ntfy.example.org",
       "topic": "horae-reminders",
       "quiet_hours": {
         "start": "22:00",
@@ -113,7 +116,7 @@
     "expect": {
       "request": null,
       "result": {
-        "target": "https://ntfy.sh/horae-reminders",
+        "target": "https://ntfy.example.org/horae-reminders",
         "after_sha256": null,
         "details": {
           "delivery": "dropped",
@@ -154,7 +157,8 @@
           "title": "Backup failed",
           "tags": [
             "rotating_light"
-          ]
+          ],
+          "sequence_id": "00000000000000000000000000000000"
         }
       },
       "result": {
@@ -190,7 +194,8 @@
           "message": "**Urgent** [tap](javascript:alert(1)) ![p](https://tracker.example.net/p.png)[2J\nhttps://evil.example.net/login hidden  ok",
           "priority": 3,
           "title": "Pay nowgnp.exe \ud83d\udcc5 2020-01-01 [[x]]",
-          "click": "https://notes.example.org/daily/2026-10-29?from=digest"
+          "click": "https://notes.example.org/daily/2026-10-29?from=digest",
+          "sequence_id": "00000000000000000000000000000000"
         }
       },
       "result": {
@@ -210,13 +215,13 @@
     "params": {
       "server": "https://ntfy.example.org",
       "topic": "horae-digest",
-      "link_prefix": "obsidian://open/"
+      "link_prefix": "obsidian://vault/Daily/"
     },
     "intent": {
       "type": "notify.push",
       "title": "Today",
       "body": "Open the note",
-      "link": "obsidian://open/?file=Daily%2F2026-10-29.assistant.md"
+      "link": "obsidian://vault/Daily/2026-10-29.assistant.md"
     },
     "expect": {
       "request": {
@@ -225,7 +230,8 @@
           "topic": "horae-digest",
           "message": "Open the note",
           "priority": 3,
-          "title": "Today"
+          "title": "Today",
+          "sequence_id": "00000000000000000000000000000000"
         }
       },
       "result": {
@@ -234,6 +240,7 @@
         "details": {
           "delivery": "sent",
           "priority": 3,
+          "click": "dropped",
           "id": "Zz99"
         }
       }

@@ -19,7 +19,12 @@ async def serve_and_call() -> tuple[set[str], Any, Any]:
         tools = {tool.name for tool in (await client.list_tools()).tools}
         identity = read_result(await client.call_tool(f"{NAME}.identity", {"paths": {}}))
         intent = {"type": "notify.push", "body": "hello"}
-        arguments = {"paths": {}, "intent": intent, "tool": f"{NAME}.push", "params": {}}
+        arguments = {
+            "paths": {},
+            "intent": intent,
+            "tool": f"{NAME}.push",
+            "params": {"auth": "none"},
+        }
         refused = read_result(await client.call_tool(f"{NAME}.apply", arguments))
     return tools, identity.data, refused.data
 

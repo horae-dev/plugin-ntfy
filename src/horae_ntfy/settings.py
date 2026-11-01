@@ -6,7 +6,7 @@ A pipeline's `notify` entry configures the notifier:
 ```yaml
 - notify:
     - ntfy.push:
-        server: https://ntfy.example.org   # default https://ntfy.sh
+        server: https://ntfy.example.org   # required with auth: token (default ntfy.sh: none)
         topic: horae-reminders             # required
         priority: high                     # min | low | normal (default) | high | critical
         tags: [alarm_clock]                # ntfy tags (emoji short codes), at most 8
@@ -18,10 +18,16 @@ A pipeline's `notify` entry configures the notifier:
 These parameters are **trusted** (the pipeline author's, never a proposer's), but a typo must
 not silently turn a feature off (`quiet_hour:` would disable quiet hours), so any unknown key
 or invalid value is `SinkError("config_invalid")`, naming the parameter and never echoing its
-value. `link_prefix` is the core's (it routes a `link` only under it); the notifier checks
-the link against it again.
+value. `link_prefix` is the core's (it routes a `link` only under it); it is checked here with
+the core's rule (`check_link_prefix`) and the notifier checks the link against it again.
 
-**Server.** `https://<host>[:port]` with no path, query, fragment or user info. The host is a
+**Server.** With `auth: token` the `server` is **required**: the token is never sent to a
+default host the pipeline author did not write down. Only `auth: none` defaults to
+`https://ntfy.sh`. The plugin cannot see the network permissions approved in `horae.lock`,
+so until the core enforces egress (M5) the configured server is trusted pipeline
+configuration, like the rest of the entry.
+
+**Server URL.** `https://<host>[:port]` with no path, query, fragment or user info. The host is a
 lowercase DNS name as `permissions.network` writes it (no IP literal, no `localhost`). An
 `http://` server is accepted only for the LAN: the connection is refused unless the host
 resolves to loopback, RFC 1918 or IPv6 ULA addresses (`horae_ntfy.http`), the rule the core
@@ -52,6 +58,9 @@ _TAG = re.compile(r"[a-z0-9+][a-z0-9_+-]{0,31}")
 _HOST = re.compile(r"([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z]([a-z0-9-]{0,61}[a-z0-9])?")
 _LOCALHOST = re.compile(r"(^|\.)localhost$")
 _HHMM = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
+LINK_SCHEMES = frozenset({"https", "obsidian"})
+_UNSAFE_ESCAPES = ("%2e", "%2f", "%5c", "%25")
+MAX_PREFIX = 2048
 
 During = Literal["delay", "drop"]
 
@@ -121,6 +130,45 @@ def _server(value: object) -> tuple[str, Literal["https", "http"], str]:
     return f"{scheme}://{netloc}", "https" if scheme == "https" else "http", host
 
 
+def clean_path(path: str, *, prefix: bool) -> bool:
+    """The core's rule (`horae.engine.executor._clean_path`). A `link_prefix` path
+    (`prefix=True`: absolute, at least one segment, ending in `/`), or the rest of a link's
+    path after it: no empty (but a trailing), `.` or `..` segment, no backslash, no escaped
+    dot, slash, backslash or percent sign."""
+    lowered = path.lower()
+    if "\\" in path or any(escape in lowered for escape in _UNSAFE_ESCAPES):
+        return False
+    segments = path.split("/")
+    if prefix:
+        if len(segments) < 3 or segments[0] != "" or segments[-1] != "":
+            return False
+        segments = segments[1:-1]
+    elif segments[-1] == "":
+        segments = segments[:-1]
+    return all(segment not in ("", ".", "..") for segment in segments)
+
+
+def check_link_prefix(prefix: str) -> bool:
+    """Whether `prefix` is a safe `link_prefix`, by the core's rule
+    (`horae.engine.executor._check_link_prefix`): an `https://` or `obsidian://` URL with a
+    host, no user info, query or fragment, and a clean absolute path ending in `/`."""
+    if len(prefix) > MAX_PREFIX or any(ch <= " " or ch == "\x7f" for ch in prefix):
+        return False
+    try:
+        parts = urlsplit(prefix)
+    except ValueError:
+        return False
+    return (
+        parts.scheme in LINK_SCHEMES
+        and bool(parts.netloc)
+        and "@" not in parts.netloc
+        and "?" not in prefix
+        and "#" not in prefix
+        and prefix.endswith("/")
+        and clean_path(parts.path, prefix=True)
+    )
+
+
 def _clock(value: object, name: str) -> time:
     match = _HHMM.fullmatch(value) if isinstance(value, str) else None
     if match is None:
@@ -152,6 +200,11 @@ def parse(params: dict[str, Any]) -> Settings:
     unknown = sorted(str(key) for key in set(params) - _KEYS)
     if unknown:
         raise _invalid(f"{unknown[0]!r:.40}", "unknown parameter")
+    auth = params.get("auth", "token")
+    if auth not in ("token", "none"):
+        raise _invalid("auth", "must be token or none")
+    if "server" not in params and auth == "token":
+        raise _invalid("server", "required with auth: token (the default ntfy.sh is for none)")
     server, scheme, host = _server(params.get("server", DEFAULT_SERVER))
     topic = params.get("topic")
     if not isinstance(topic, str) or not _TOPIC.fullmatch(topic):
@@ -167,12 +220,11 @@ def parse(params: dict[str, Any]) -> Settings:
         or len(set(tags)) != len(tags)
     ):
         raise _invalid("tags", f"at most {MAX_TAGS} distinct short codes (a-z 0-9 _ + -)")
-    auth = params.get("auth", "token")
-    if auth not in ("token", "none"):
-        raise _invalid("auth", "must be token or none")
     prefix = params.get("link_prefix")
-    if prefix is not None and not isinstance(prefix, str):
-        raise _invalid("link_prefix", "must be a string")
+    if prefix is not None and not (isinstance(prefix, str) and check_link_prefix(prefix)):
+        raise _invalid(
+            "link_prefix", "must be an https:// or obsidian:// URL with a clean path ending in /"
+        )
     return Settings(
         server=server,
         scheme=scheme,

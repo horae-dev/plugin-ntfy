@@ -425,6 +425,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "horae-sdk" },
+    { name = "httpcore2" },
     { name = "httpx2" },
     { name = "tzdata" },
 ]
@@ -442,7 +443,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "horae-sdk", git = "https://github.com/horae-dev/horae?subdirectory=sdk&branch=main" },
-    { name = "httpx2", specifier = ">=2.16,<3" },
+    { name = "httpcore2", specifier = ">=2.16,<2.17" },
+    { name = "httpx2", specifier = ">=2.16,<2.17" },
     { name = "tzdata", specifier = ">=2026.5" },
 ]
 

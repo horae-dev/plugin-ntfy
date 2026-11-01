@@ -3,10 +3,12 @@
 the token never shows in an error, a log, stderr or a result."""
 
 import logging
-from collections.abc import Callable
+import traceback
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import anyio
+import httpcore2
 import httpx2
 import pytest
 from horae_sdk import Applied, ApplyRequest, Paths, SinkError
@@ -18,6 +20,8 @@ from horae_ntfy.http import (
     Publisher,
     default_transport,
     lan_address,
+    lan_only,
+    self_test,
     system_resolver,
 )
 from horae_ntfy.plugin import NtfyNotifier
@@ -161,7 +165,9 @@ def raising(error: Callable[[httpx2.Request], Exception]) -> Recorder:
 
 def test_a_connect_failure_is_retried_once() -> None:
     recorder = raising(lambda request: httpx2.ConnectError(f"no route {TOKEN}", request=request))
-    error = failure(recorded_notifier(recorder), {"topic": "t"})
+    error = failure(
+        recorded_notifier(recorder), {"server": "https://ntfy.example.org", "topic": "t"}
+    )
     assert error.kind == "network_error"
     assert len(recorder.requests) == 2
 
@@ -175,7 +181,9 @@ def test_a_connect_failure_then_success_delivers() -> None:
             raise httpx2.ConnectTimeout("slow", request=request)
         return httpx2.Response(200, json={"id": "Ok1"})
 
-    applied = apply(recorded_notifier(Recorder(flaky)), {"topic": "t"})
+    applied = apply(
+        recorded_notifier(Recorder(flaky)), {"server": "https://ntfy.example.org", "topic": "t"}
+    )
     assert applied.details["id"] == "Ok1"
     assert len(calls) == 2
 
@@ -193,7 +201,12 @@ def test_a_failure_after_sending_is_not_retried(
     error: type[httpx2.RequestError], kind: str
 ) -> None:
     recorder = raising(lambda request: error(f"boom {TOKEN}", request=request))
-    assert failure(recorded_notifier(recorder), {"topic": "t"}).kind == kind
+    assert (
+        failure(
+            recorded_notifier(recorder), {"server": "https://ntfy.example.org", "topic": "t"}
+        ).kind
+        == kind
+    )
     assert len(recorder.requests) == 1
 
 
@@ -240,7 +253,100 @@ def test_the_system_resolver_answers_for_localhost() -> None:
 def test_an_https_server_connects_directly() -> None:
     """Only `http://` goes through the LAN check: an `https://` server's connections are
     made by the default backend (the egress proxy of M5 will police them)."""
-    https = default_transport(parse({"topic": "t"}), loopback)
+    https = default_transport(parse({"server": "https://ntfy.example.org", "topic": "t"}), loopback)
     http = default_transport(parse({"topic": "t", "server": "http://ntfy"}), loopback)
     assert not isinstance(https._pool._network_backend, LanOnlyNetwork)  # type: ignore[attr-defined]
     assert isinstance(http._pool._network_backend, LanOnlyNetwork)  # type: ignore[attr-defined]
+
+
+# --- LAN addresses in order --------------------------------------------------------------------
+
+
+class Inner(httpcore2.AsyncNetworkBackend):
+    """A network backend that refuses every address except `good`, recording the attempts."""
+
+    def __init__(self, good: str | None) -> None:
+        self.good = good
+        self.tried: list[str] = []
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> httpcore2.AsyncNetworkStream:
+        self.tried.append(host)
+        if host != self.good:
+            raise httpcore2.ConnectError("refused")
+        return object()  # type: ignore[return-value]
+
+
+def connect(inner: Inner, addresses: Sequence[str]) -> object:
+    async def resolve(host: str, port: int) -> Sequence[str]:
+        return addresses
+
+    async def run() -> object:
+        return await LanOnlyNetwork(inner, resolve).connect_tcp("ntfy.lan", 80, timeout=1.0)
+
+    return anyio.run(run)
+
+
+def test_each_checked_lan_address_is_tried_in_order() -> None:
+    inner = Inner(good="10.0.0.3")
+    connect(inner, ["fd00::1", "10.0.0.2", "10.0.0.3", "10.0.0.4"])
+    assert inner.tried == ["fd00::1", "10.0.0.2", "10.0.0.3"]
+
+
+def test_when_no_lan_address_answers_the_last_error_is_raised() -> None:
+    inner = Inner(good=None)
+    with pytest.raises(httpcore2.ConnectError):
+        connect(inner, ["10.0.0.2", "10.0.0.3"])
+    assert inner.tried == ["10.0.0.2", "10.0.0.3"]
+
+
+# --- httpx2 internals -----------------------------------------------------------------------
+
+
+def test_the_startup_self_test_passes_with_the_pinned_httpx2() -> None:
+    self_test()
+
+
+def test_missing_httpx2_internals_are_an_internal_error_not_a_type_error() -> None:
+    transport = httpx2.AsyncHTTPTransport()
+    del transport._pool
+    with pytest.raises(SinkError) as raised:
+        lan_only(transport, loopback)
+    assert raised.value.kind == "internal"
+
+
+def test_the_plugin_refuses_to_start_when_the_self_test_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import horae_ntfy.__main__ as entry
+
+    def broken() -> None:
+        raise SinkError("internal", "this httpx2 version cannot restrict http:// to the LAN")
+
+    monkeypatch.setattr(entry, "self_test", broken)
+    with pytest.raises(SystemExit) as raised:
+        entry.main([])
+    assert "internal" in str(raised.value.code)
+
+
+# --- an unexpected exception ----------------------------------------------------------------
+
+
+def test_an_unexpected_exception_carries_no_token_in_its_traceback() -> None:
+    def crash(request: httpx2.Request) -> httpx2.Response:
+        raise RuntimeError("an unexpected bug in a transport")
+
+    with pytest.raises(RuntimeError) as raised:
+        apply(
+            recorded_notifier(Recorder(crash)), {"server": "https://ntfy.example.org", "topic": "t"}
+        )
+    text = "".join(traceback.format_exception(raised.value))
+    assert "unexpected bug" in text
+    assert TOKEN not in text
+    assert TOKEN not in repr(raised.value.__context__)

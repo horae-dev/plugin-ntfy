@@ -3,8 +3,9 @@
 
 import sys
 
-from horae_sdk import dump_manifest
+from horae_sdk import SinkError, dump_manifest
 
+from horae_ntfy.http import self_test
 from horae_ntfy.plugin import build, manifest
 
 HEADER = """\
@@ -20,6 +21,10 @@ def main(argv: list[str]) -> None:
         return
     if argv:
         sys.exit("usage: python -m horae_ntfy [--manifest]")
+    try:
+        self_test()  # fail at startup, not on the first push, if httpx2 changed
+    except SinkError as error:
+        sys.exit(f"horae_ntfy: {error.kind}: {error}")
     # Never print while serving: stdout is the protocol channel.
     build().run()
 

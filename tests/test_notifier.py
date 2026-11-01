@@ -14,12 +14,14 @@ from fakes import (
     FIXED_NOW,
     HOST,
     TOKEN,
+    Behaviour,
     FakeNtfy,
     Recorder,
     env,
     lan_notifier,
     recorded_notifier,
 )
+from horae_ntfy.message import sequence_id
 from horae_ntfy.plugin import NtfyNotifier
 
 NIGHT = {"start": "22:00", "end": "07:00"}
@@ -59,6 +61,7 @@ def test_delivers_over_http_to_the_lan_server(ntfy: FakeNtfy) -> None:
         "message": "3 tasks due",
         "title": "Today",
         "priority": 3,
+        "sequence_id": sequence_id("k" * 64),
     }
     assert seen.headers["host"] == f"{HOST}:{ntfy.port}"
     assert seen.headers["authorization"] == f"Bearer {TOKEN}"
@@ -81,10 +84,20 @@ def test_an_https_server_gets_the_same_request() -> None:
     assert applied.details["id"] == "Zz99"
 
 
-def test_the_default_server_is_ntfy_sh() -> None:
+def test_the_default_server_is_ntfy_sh_only_without_a_token() -> None:
     recorder = Recorder()
-    apply(recorded_notifier(recorder), {"topic": "t"})
+    apply(recorded_notifier(recorder), {"topic": "t", "auth": "none"})
     assert str(recorder.requests[0].url) == "https://ntfy.sh/"
+    assert "authorization" not in recorder.requests[0].headers
+
+
+def test_a_token_is_never_sent_to_a_default_server() -> None:
+    recorder = Recorder()
+    with pytest.raises(SinkError) as raised:
+        apply(recorded_notifier(recorder), {"topic": "t"})
+    assert raised.value.kind == "config_invalid"
+    assert "server" in raised.value.message
+    assert recorder.requests == []
 
 
 @pytest.mark.parametrize(
@@ -125,7 +138,7 @@ def test_the_process_environment_holds_the_token(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("NTFY_TOKEN", TOKEN)
     recorder = Recorder()
     notifier = NtfyNotifier(recorded_notifier(recorder).publisher)
-    apply(notifier, {"topic": "t"})
+    apply(notifier, {"server": "https://ntfy.example.org", "topic": "t"})
     assert recorder.requests[0].headers["authorization"] == f"Bearer {TOKEN}"
 
 
@@ -179,7 +192,8 @@ def test_during_quiet_hours_a_push_is_delayed_to_their_end(ntfy: FakeNtfy) -> No
     applied = apply(
         lan_notifier(now=LATE), {"server": ntfy.url, "topic": "t", "quiet_hours": NIGHT}
     )
-    assert ntfy.seen[0].json()["delay"] == str(int(MORNING.timestamp()))
+    # 22:30 UTC to 06:00 UTC: a duration, which the server counts on its own clock.
+    assert ntfy.seen[0].json()["delay"] == f"{int((MORNING - LATE).total_seconds())}s" == "27000s"
     assert applied.details == {
         "delivery": "delayed",
         "priority": 3,
@@ -188,10 +202,32 @@ def test_during_quiet_hours_a_push_is_delayed_to_their_end(ntfy: FakeNtfy) -> No
     }
 
 
-def test_a_delay_is_at_least_ten_seconds(ntfy: FakeNtfy) -> None:
+def test_a_delay_is_at_least_thirty_seconds(ntfy: FakeNtfy) -> None:
     almost = datetime(2026, 10, 30, 5, 59, 55, 500000, tzinfo=UTC)  # 06:59:55.5 in Paris
-    apply(lan_notifier(now=almost), {"server": ntfy.url, "topic": "t", "quiet_hours": NIGHT})
-    assert ntfy.seen[0].json()["delay"] == str(math.ceil(almost.timestamp() + 10))
+    applied = apply(
+        lan_notifier(now=almost), {"server": ntfy.url, "topic": "t", "quiet_hours": NIGHT}
+    )
+    assert ntfy.seen[0].json()["delay"] == "30s"
+    assert applied.details["until"] == "2026-10-30T06:00:25+00:00"
+
+
+def test_a_delay_rounds_up_to_the_end(ntfy: FakeNtfy) -> None:
+    early = datetime(2026, 10, 30, 5, 30, 0, 250000, tzinfo=UTC)  # 06:30:00.25 in Paris
+    apply(lan_notifier(now=early), {"server": ntfy.url, "topic": "t", "quiet_hours": NIGHT})
+    assert ntfy.seen[0].json()["delay"] == f"{math.ceil(29 * 60 + 59.75)}s" == "1800s"
+
+
+def test_on_the_fall_back_night_a_push_waits_for_the_later_end(ntfy: FakeNtfy) -> None:
+    """Paris, 2026-10-25: 02:30 happens twice. With quiet hours ending at 02:30, a push in
+    the first pass is not delivered at the first 02:30 (CEST), which the clock passes before
+    coming back into the window, but at the second (CET)."""
+    window = {"start": "01:00", "end": "02:30"}
+    first_pass = datetime(2026, 10, 25, 0, 10, tzinfo=UTC)  # 02:10 CEST
+    applied = apply(
+        lan_notifier(now=first_pass), {"server": ntfy.url, "topic": "t", "quiet_hours": window}
+    )
+    assert applied.details["until"] == "2026-10-25T01:30:00+00:00"  # 02:30 CET
+    assert ntfy.seen[0].json()["delay"] == "4800s"
 
 
 def test_during_quiet_hours_drop_sends_nothing(ntfy: FakeNtfy) -> None:
@@ -202,6 +238,53 @@ def test_during_quiet_hours_drop_sends_nothing(ntfy: FakeNtfy) -> None:
     assert ntfy.seen == []
     assert applied.details == {"delivery": "dropped", "priority": 3}
     assert applied.target == f"{ntfy.url}/t"
+
+
+def test_a_400_to_a_delayed_push_is_delay_refused_and_not_sent_now(ntfy: FakeNtfy) -> None:
+    ntfy.behaviour = Behaviour(status=400, body=b'{"code":40005}')
+    with pytest.raises(SinkError) as raised:
+        apply(lan_notifier(now=LATE), {"server": ntfy.url, "topic": "t", "quiet_hours": NIGHT})
+    assert raised.value.kind == "delay_refused"
+    [seen] = ntfy.seen  # once, with the delay: never re-sent without it
+    assert seen.json()["delay"] == "27000s"
+
+
+# --- deduplication ----------------------------------------------------------------------------
+
+
+def test_the_same_dedupe_key_sends_the_same_sequence_id() -> None:
+    """A retried or re-run apply of one notification replaces it on the server and the phone
+    (ntfy's sequence_id) instead of adding a copy; another key gets another id."""
+    recorder = Recorder()
+    notifier = recorded_notifier(recorder)
+    params = {"server": "https://ntfy.example.org", "topic": "t"}
+    apply(notifier, params)
+    apply(notifier, params)
+    first, again = recorder.json(0)["sequence_id"], recorder.json(1)["sequence_id"]
+    assert first == again == sequence_id("k" * 64)
+
+    async def other() -> None:
+        intent = {"type": "notify.push", "body": "x", "link": None}
+        call = ApplyRequest(Paths(), intent, tool="ntfy.push", params=params, dedupe_key="a" * 64)
+        await notifier.apply(call)
+
+    anyio.run(other)
+    assert recorder.json(2)["sequence_id"] == "a" * 32
+
+
+def test_a_delayed_push_keeps_its_sequence_id(ntfy: FakeNtfy) -> None:
+    apply(lan_notifier(now=LATE), {"server": ntfy.url, "topic": "t", "quiet_hours": NIGHT})
+    assert ntfy.seen[0].json()["sequence_id"] == sequence_id("k" * 64)
+
+
+def test_an_obsidian_link_is_reported_as_a_dropped_click(ntfy: FakeNtfy) -> None:
+    applied = apply(
+        lan_notifier(),
+        {"server": ntfy.url, "topic": "t", "link_prefix": "obsidian://vault/daily/"},
+        link="obsidian://vault/daily/2026-10-29",
+    )
+    assert "click" not in ntfy.seen[0].json()
+    assert applied.details["click"] == "dropped"
 
 
 @pytest.mark.parametrize("during", ["delay", "drop"])

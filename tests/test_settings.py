@@ -9,15 +9,17 @@ from horae_sdk import SinkError
 
 from horae_ntfy.settings import PRIORITIES, QuietHours, parse
 
+SERVER = {"server": "https://ntfy.example.org"}
+
 
 def test_defaults() -> None:
-    settings = parse({"topic": "reminders"})
+    settings = parse({"topic": "reminders", "auth": "none"})
     assert settings.server == "https://ntfy.sh"
     assert (settings.scheme, settings.host) == ("https", "ntfy.sh")
     assert settings.priority == "normal"
     assert settings.ntfy_priority == 3
     assert settings.tags == ()
-    assert settings.auth == "token"
+    assert settings.auth == "none"
     assert settings.quiet_hours is None
     assert settings.link_prefix is None
     assert not settings.critical
@@ -42,7 +44,9 @@ def test_everything_set() -> None:
 
 
 def test_priorities_map_to_ntfy_one_to_five() -> None:
-    assert {name: parse({"topic": "t", "priority": name}).ntfy_priority for name in PRIORITIES} == {
+    assert {
+        name: parse({**SERVER, "topic": "t", "priority": name}).ntfy_priority for name in PRIORITIES
+    } == {
         "min": 1,
         "low": 2,
         "normal": 3,
@@ -52,7 +56,7 @@ def test_priorities_map_to_ntfy_one_to_five() -> None:
 
 
 def test_an_http_server_is_accepted_for_the_lan_path() -> None:
-    settings = parse({"topic": "t", "server": "http://ntfy:8080"})
+    settings = parse({**SERVER, "topic": "t", "server": "http://ntfy:8080"})
     assert (settings.scheme, settings.server) == ("http", "http://ntfy:8080")
 
 
@@ -82,7 +86,7 @@ def test_an_http_server_is_accepted_for_the_lan_path() -> None:
 )
 def test_invalid_servers_are_refused(server: Any) -> None:
     with pytest.raises(SinkError) as raised:
-        parse({"topic": "t", "server": server})
+        parse({**SERVER, "topic": "t", "server": server})
     assert raised.value.kind == "config_invalid"
     assert "server" in raised.value.message
 
@@ -90,31 +94,48 @@ def test_invalid_servers_are_refused(server: Any) -> None:
 @pytest.mark.parametrize(
     ("params", "name"),
     [
-        ({}, "topic"),
-        ({"topic": ""}, "topic"),
-        ({"topic": "a/b"}, "topic"),
-        ({"topic": "x" * 65}, "topic"),
-        ({"topic": "t", "priority": "urgent"}, "priority"),
-        ({"topic": "t", "priority": 5}, "priority"),
-        ({"topic": "t", "tags": "warning"}, "tags"),
-        ({"topic": "t", "tags": ["Warning"]}, "tags"),
-        ({"topic": "t", "tags": ["a", "a"]}, "tags"),
-        ({"topic": "t", "tags": [str(i) for i in range(9)]}, "tags"),
-        ({"topic": "t", "auth": "basic"}, "auth"),
-        ({"topic": "t", "link_prefix": 3}, "link_prefix"),
-        ({"topic": "t", "quiet_hour": {"start": "22:00", "end": "07:00"}}, "quiet_hour"),
-        ({"topic": "t", "quiet_hours": "22:00-07:00"}, "quiet_hours"),
-        ({"topic": "t", "quiet_hours": {"start": "22:00"}}, "quiet_hours"),
-        ({"topic": "t", "quiet_hours": {"start": "22:00", "end": "22:00"}}, "quiet_hours"),
-        ({"topic": "t", "quiet_hours": {"start": "24:00", "end": "07:00"}}, "quiet_hours.start"),
-        ({"topic": "t", "quiet_hours": {"start": "22:00", "end": "7:00"}}, "quiet_hours.end"),
-        ({"topic": "t", "quiet_hours": {"start": "22:00", "end": 7}}, "quiet_hours.end"),
+        (SERVER, "topic"),
+        ({**SERVER, "topic": ""}, "topic"),
+        ({**SERVER, "topic": "a/b"}, "topic"),
+        ({**SERVER, "topic": "x" * 65}, "topic"),
+        ({**SERVER, "topic": "t", "priority": "urgent"}, "priority"),
+        ({**SERVER, "topic": "t", "priority": 5}, "priority"),
+        ({**SERVER, "topic": "t", "tags": "warning"}, "tags"),
+        ({**SERVER, "topic": "t", "tags": ["Warning"]}, "tags"),
+        ({**SERVER, "topic": "t", "tags": ["a", "a"]}, "tags"),
+        ({**SERVER, "topic": "t", "tags": [str(i) for i in range(9)]}, "tags"),
+        ({**SERVER, "topic": "t", "auth": "basic"}, "auth"),
+        ({**SERVER, "topic": "t", "link_prefix": 3}, "link_prefix"),
+        ({**SERVER, "topic": "t", "quiet_hour": {"start": "22:00", "end": "07:00"}}, "quiet_hour"),
+        ({**SERVER, "topic": "t", "quiet_hours": "22:00-07:00"}, "quiet_hours"),
+        ({**SERVER, "topic": "t", "quiet_hours": {"start": "22:00"}}, "quiet_hours"),
         (
-            {"topic": "t", "quiet_hours": {"start": "22:00", "end": "07:00", "tz": "UTC"}},
+            {**SERVER, "topic": "t", "quiet_hours": {"start": "22:00", "end": "22:00"}},
             "quiet_hours",
         ),
         (
-            {"topic": "t", "quiet_hours": {"start": "22:00", "end": "07:00", "during": "queue"}},
+            {**SERVER, "topic": "t", "quiet_hours": {"start": "24:00", "end": "07:00"}},
+            "quiet_hours.start",
+        ),
+        (
+            {**SERVER, "topic": "t", "quiet_hours": {"start": "22:00", "end": "7:00"}},
+            "quiet_hours.end",
+        ),
+        ({**SERVER, "topic": "t", "quiet_hours": {"start": "22:00", "end": 7}}, "quiet_hours.end"),
+        (
+            {
+                **SERVER,
+                "topic": "t",
+                "quiet_hours": {"start": "22:00", "end": "07:00", "tz": "UTC"},
+            },
+            "quiet_hours",
+        ),
+        (
+            {
+                **SERVER,
+                "topic": "t",
+                "quiet_hours": {"start": "22:00", "end": "07:00", "during": "queue"},
+            },
             "quiet_hours.during",
         ),
     ],
@@ -128,5 +149,60 @@ def test_invalid_parameters_are_refused_by_name(params: dict[str, Any], name: st
 
 def test_the_message_never_echoes_a_value() -> None:
     with pytest.raises(SinkError) as raised:
-        parse({"topic": "t", "server": "https://ntfy.example.org/secret-path-value"})
+        parse({**SERVER, "topic": "t", "server": "https://ntfy.example.org/secret-path-value"})
     assert "secret-path-value" not in raised.value.message
+
+
+def test_a_token_needs_an_explicit_server() -> None:
+    """No silent default to ntfy.sh when a token would be sent there."""
+    with pytest.raises(SinkError) as raised:
+        parse({"topic": "t"})
+    assert raised.value.kind == "config_invalid"
+    assert "parameter server" in raised.value.message
+    with pytest.raises(SinkError):
+        parse({"topic": "t", "auth": "token"})
+    assert parse({"topic": "t", "auth": "none"}).server == "https://ntfy.sh"
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "https://notes.example.org/daily/",
+        "https://notes.example.org:8443/a/b/",
+        "obsidian://vault/daily/",
+    ],
+)
+def test_valid_link_prefixes(prefix: str) -> None:
+    assert parse({**SERVER, "topic": "t", "link_prefix": prefix}).link_prefix == prefix
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "https://notes.example.org/daily",  # no trailing /
+        "https://notes.example.org",
+        "https://notes.example.org/",  # at least one segment, as the core requires
+        "http://notes.example.org/daily/",
+        "javascript://x/",
+        "https:///daily/",
+        "https://user@notes.example.org/daily/",
+        "https://notes.example.org/daily/?x=1/",
+        "https://notes.example.org/daily/#x/",
+        "https://notes.example.org/a/../",
+        "https://notes.example.org/a/./",
+        "https://notes.example.org//a/",
+        "https://notes.example.org/%2e%2e/",
+        "https://notes.example.org/a%2Fb/",
+        "https://notes.example.org/a%5cb/",
+        "https://notes.example.org/a%25/",
+        "https://notes.example.org/a\\b/",
+        "https://notes.example.org/a b/",
+        "https://[notes.example.org/daily/",
+        "https://notes.example.org/" + "a" * 2100 + "/",
+    ],
+)
+def test_unsafe_link_prefixes_are_refused(prefix: str) -> None:
+    with pytest.raises(SinkError) as raised:
+        parse({**SERVER, "topic": "t", "link_prefix": prefix})
+    assert raised.value.kind == "config_invalid"
+    assert "parameter link_prefix" in raised.value.message
