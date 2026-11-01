@@ -1,0 +1,4 @@
+# Findings gitleaks reports in history that are not secrets (CI scans the full history,
+# so a commit already pushed cannot be fixed by editing the file).
+# tests/test_message.py: a synthetic dedupe key ("0123456789abcdef" * 4), since replaced.
+d158258cfd9bd6a2090da76299e83cfec72da0d1:tests/test_message.py:generic-api-key:65

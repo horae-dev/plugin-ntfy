@@ -1,0 +1,299 @@
+[
+  {
+    "name": "digest",
+    "now": "2026-10-29T06:30:00+00:00",
+    "params": {
+      "server": "https://ntfy.example.org",
+      "topic": "horae-digest",
+      "priority": "normal",
+      "tags": [
+        "sunrise"
+      ],
+      "link_prefix": "https://notes.example.org/daily/",
+      "quiet_hours": {
+        "start": "22:00",
+        "end": "07:00"
+      }
+    },
+    "intent": {
+      "type": "notify.push",
+      "title": "Today",
+      "body": "3 tasks due, 1 overdue",
+      "link": "https://notes.example.org/daily/2026-10-29"
+    },
+    "expect": {
+      "request": {
+        "url": "https://ntfy.example.org/",
+        "json": {
+          "topic": "horae-digest",
+          "message": "3 tasks due, 1 overdue",
+          "priority": 3,
+          "title": "Today",
+          "tags": [
+            "sunrise"
+          ],
+          "click": "https://notes.example.org/daily/2026-10-29",
+          "sequence_id": "00000000000000000000000000000000"
+        }
+      },
+      "result": {
+        "target": "https://ntfy.example.org/horae-digest",
+        "after_sha256": null,
+        "details": {
+          "delivery": "sent",
+          "priority": 3,
+          "id": "Zz99"
+        }
+      }
+    }
+  },
+  {
+    "name": "reminder-in-quiet-hours",
+    "now": "2026-10-29T22:30:00+00:00",
+    "params": {
+      "server": "https://ntfy.example.org",
+      "topic": "horae-reminders",
+      "priority": "high",
+      "tags": [
+        "alarm_clock"
+      ],
+      "quiet_hours": {
+        "start": "22:00",
+        "end": "07:00"
+      }
+    },
+    "intent": {
+      "type": "notify.push",
+      "title": "\u23f0 19:00",
+      "body": "Take the bins out",
+      "link": null
+    },
+    "expect": {
+      "request": {
+        "url": "https://ntfy.example.org/",
+        "json": {
+          "topic": "horae-reminders",
+          "message": "Take the bins out",
+          "priority": 4,
+          "title": "\u23f0 19:00",
+          "tags": [
+            "alarm_clock"
+          ],
+          "delay": "27000s",
+          "sequence_id": "00000000000000000000000000000000"
+        }
+      },
+      "result": {
+        "target": "https://ntfy.example.org/horae-reminders",
+        "after_sha256": null,
+        "details": {
+          "delivery": "delayed",
+          "priority": 4,
+          "id": "Zz99",
+          "until": "2026-10-30T06:00:00+00:00"
+        }
+      }
+    }
+  },
+  {
+    "name": "reminder-dropped",
+    "now": "2026-10-29T22:30:00+00:00",
+    "params": {
+      "server": "https://ntfy.example.org",
+      "topic": "horae-reminders",
+      "quiet_hours": {
+        "start": "22:00",
+        "end": "07:00",
+        "during": "drop"
+      }
+    },
+    "intent": {
+      "type": "notify.push",
+      "title": null,
+      "body": "Water the plants",
+      "link": null
+    },
+    "expect": {
+      "request": null,
+      "result": {
+        "target": "https://ntfy.example.org/horae-reminders",
+        "after_sha256": null,
+        "details": {
+          "delivery": "dropped",
+          "priority": 3
+        }
+      }
+    }
+  },
+  {
+    "name": "critical-in-quiet-hours",
+    "now": "2026-10-29T23:59:00+00:00",
+    "params": {
+      "server": "https://ntfy.example.org",
+      "topic": "horae-alerts",
+      "priority": "critical",
+      "tags": [
+        "rotating_light"
+      ],
+      "quiet_hours": {
+        "start": "22:00",
+        "end": "07:00",
+        "during": "drop"
+      }
+    },
+    "intent": {
+      "type": "notify.push",
+      "title": "Backup failed",
+      "body": "The nightly backup did not run",
+      "link": null
+    },
+    "expect": {
+      "request": {
+        "url": "https://ntfy.example.org/",
+        "json": {
+          "topic": "horae-alerts",
+          "message": "The nightly backup did not run",
+          "priority": 5,
+          "title": "Backup failed",
+          "tags": [
+            "rotating_light"
+          ],
+          "sequence_id": "00000000000000000000000000000000"
+        }
+      },
+      "result": {
+        "target": "https://ntfy.example.org/horae-alerts",
+        "after_sha256": null,
+        "details": {
+          "delivery": "sent",
+          "priority": 5,
+          "id": "Zz99"
+        }
+      }
+    }
+  },
+  {
+    "name": "hostile",
+    "now": "2026-10-29T12:00:00+00:00",
+    "params": {
+      "server": "https://ntfy.example.org",
+      "topic": "horae-digest",
+      "link_prefix": "https://notes.example.org/daily/"
+    },
+    "intent": {
+      "type": "notify.push",
+      "title": "Pay now\u202egnp.exe\u200b \ud83d\udcc5 2020-01-01 [[x]]",
+      "body": "**Urgent** [tap](javascript:alert(1)) ![p](https://tracker.example.net/p.png)\u001b[2J\r\nhttps://evil.example.net/login \u2066hidden\u2069 \udb40\udc49\udb40\udc47\udb40\udc4e\udb40\udc4f\udb40\udc52\udb40\udc45 ok",
+      "link": "https://notes.example.org/daily/2026-10-29?from=digest"
+    },
+    "expect": {
+      "request": {
+        "url": "https://ntfy.example.org/",
+        "json": {
+          "topic": "horae-digest",
+          "message": "**Urgent** [tap](javascript:alert(1)) ![p](https://tracker.example.net/p.png)[2J\nhttps://evil.example.net/login hidden  ok",
+          "priority": 3,
+          "title": "Pay nowgnp.exe \ud83d\udcc5 2020-01-01 [[x]]",
+          "click": "https://notes.example.org/daily/2026-10-29?from=digest",
+          "sequence_id": "00000000000000000000000000000000"
+        }
+      },
+      "result": {
+        "target": "https://ntfy.example.org/horae-digest",
+        "after_sha256": null,
+        "details": {
+          "delivery": "sent",
+          "priority": 3,
+          "id": "Zz99"
+        }
+      }
+    }
+  },
+  {
+    "name": "obsidian-link-left-for-story-4",
+    "now": "2026-10-29T12:00:00+00:00",
+    "params": {
+      "server": "https://ntfy.example.org",
+      "topic": "horae-digest",
+      "link_prefix": "obsidian://vault/Daily/"
+    },
+    "intent": {
+      "type": "notify.push",
+      "title": "Today",
+      "body": "Open the note",
+      "link": "obsidian://vault/Daily/2026-10-29.assistant.md"
+    },
+    "expect": {
+      "request": {
+        "url": "https://ntfy.example.org/",
+        "json": {
+          "topic": "horae-digest",
+          "message": "Open the note",
+          "priority": 3,
+          "title": "Today",
+          "sequence_id": "00000000000000000000000000000000"
+        }
+      },
+      "result": {
+        "target": "https://ntfy.example.org/horae-digest",
+        "after_sha256": null,
+        "details": {
+          "delivery": "sent",
+          "priority": 3,
+          "click": "dropped",
+          "id": "Zz99"
+        }
+      }
+    }
+  },
+  {
+    "name": "link-outside-prefix",
+    "now": "2026-10-29T12:00:00+00:00",
+    "params": {
+      "server": "https://ntfy.example.org",
+      "topic": "horae-digest",
+      "link_prefix": "https://notes.example.org/daily/"
+    },
+    "intent": {
+      "type": "notify.push",
+      "title": "Today",
+      "body": "x",
+      "link": "https://evil.example.net/daily/x"
+    },
+    "expect": {
+      "request": null,
+      "result": {
+        "error": {
+          "kind": "intent_invalid",
+          "message": "the notification link is not under link_prefix"
+        }
+      }
+    }
+  },
+  {
+    "name": "unknown-parameter",
+    "now": "2026-10-29T12:00:00+00:00",
+    "params": {
+      "topic": "horae-digest",
+      "quiet_hour": {
+        "start": "22:00",
+        "end": "07:00"
+      }
+    },
+    "intent": {
+      "type": "notify.push",
+      "title": null,
+      "body": "x",
+      "link": null
+    },
+    "expect": {
+      "request": null,
+      "result": {
+        "error": {
+          "kind": "config_invalid",
+          "message": "ntfy.push parameter 'quiet_hour': unknown parameter"
+        }
+      }
+    }
+  }
+]
