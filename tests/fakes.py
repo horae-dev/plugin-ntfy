@@ -9,6 +9,7 @@ notifier reaches it through the `http://` LAN path with a fake resolver that ans
 import atexit
 import contextlib
 import json
+import os
 import shutil
 import tempfile
 import threading
@@ -19,8 +20,9 @@ from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+import anyio
 import httpx2
-from horae_sdk import Paths
+from horae_sdk import ApplyRequest, Paths
 
 from horae_ntfy.http import Publisher
 from horae_ntfy.plugin import NtfyNotifier
@@ -160,3 +162,22 @@ def recorded_notifier(
         now=lambda: now,
         env=env() if environ is None else environ,
     )
+
+
+def push_in_process(barrier: Any, directory: str, server: str, results: Any) -> None:
+    """A run in its own process (`multiprocessing`, spawn): waits at `barrier` with the other
+    runs, then applies one push through the loopback server, sharing only `directory`."""
+    call = ApplyRequest(
+        Paths(write=(directory,)),
+        {"type": "notify.push", "body": "at 15:00", "link": None},
+        tool="ntfy.push",
+        params={"server": server, "topic": "reminders"},
+        dedupe_key=f"{os.getpid():064x}",
+    )
+
+    async def go() -> str:
+        applied = await lan_notifier().apply(call)
+        return str(applied.details["delivery"])
+
+    barrier.wait()
+    results.put(anyio.run(go))

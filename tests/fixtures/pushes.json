@@ -33,7 +33,7 @@
             "sunrise"
           ],
           "click": "https://notes.example.org/daily/2026-10-29",
-          "sequence_id": "00000000000000000000000000000000"
+          "sequence_id": "9e4fb73b034c2e058e807bc186625f59"
         }
       },
       "result": {
@@ -80,7 +80,7 @@
             "alarm_clock"
           ],
           "delay": "27000s",
-          "sequence_id": "00000000000000000000000000000000"
+          "sequence_id": "bded305ddaa5b2530189135cc1a59814"
         }
       },
       "result": {
@@ -158,7 +158,7 @@
           "tags": [
             "rotating_light"
           ],
-          "sequence_id": "00000000000000000000000000000000"
+          "sequence_id": "ab2ec6a00ab04c85156d9874e29bc70a"
         }
       },
       "result": {
@@ -195,7 +195,7 @@
           "priority": 3,
           "title": "Pay nowgnp.exe \ud83d\udcc5 2020-01-01 [[x]]",
           "click": "https://notes.example.org/daily/2026-10-29?from=digest",
-          "sequence_id": "00000000000000000000000000000000"
+          "sequence_id": "d5bf5d092f7a065535ff2ec58b01ed2f"
         }
       },
       "result": {
@@ -231,7 +231,7 @@
           "message": "Open the note",
           "priority": 3,
           "title": "Today",
-          "sequence_id": "00000000000000000000000000000000"
+          "sequence_id": "37c8775d31d27adf32c62cb58bbc3203"
         }
       },
       "result": {

@@ -4,7 +4,7 @@
 
 Horae plugin: push notifications through ntfy, with digests, reminders, quiet hours and action buttons.
 
-> 🚧 **In progress (M3).** `ntfy.push` sends notifications, once per reminder and day; deep links and action buttons (#4) are not built yet. Follow progress on the [Horae roadmap project](https://github.com/orgs/horae-dev/projects/1).
+> 🚧 **In progress (M3).** `ntfy.push` sends notifications, each reminder once a day; deep links and action buttons (#4) are not built yet. Follow progress on the [Horae roadmap project](https://github.com/orgs/horae-dev/projects/1).
 
 ## What it does
 
@@ -21,7 +21,7 @@ Horae plugin: push notifications through ntfy, with digests, reminders, quiet ho
         auth: token                             # token (default) | none
         quiet_hours: { start: "22:00", end: "07:00", during: delay }   # during: delay (default) | drop
         link_prefix: https://notes.example.org/daily/                  # links routed here (core)
-        dedupe: daily                           # daily (default): once per reminder and day | off
+        dedupe: daily                           # daily (default): once a day per reminder | off
 ```
 
 | Parameter | Meaning |
@@ -32,7 +32,7 @@ Horae plugin: push notifications through ntfy, with digests, reminders, quiet ho
 | `tags` | ntfy tags; a tag that is an emoji short code shows as that emoji. |
 | `auth` | `token`: send `NTFY_TOKEN` as `Authorization: Bearer`; missing is an error, never a silent anonymous publish. `none`: send no credentials. |
 | `quiet_hours` | `start` and `end` as `"HH:MM"`, local times in the instance time zone (`horae.yaml` `timezone`, which the host passes as `TZ`); `start > end` crosses midnight. See below. |
-| `dedupe` | `daily` (default): a push is sent **once per rule and local day** ([Reminder state](#reminder-state)); needs the state directory approved in `horae.lock`. `off`: every apply is pushed and no state is kept (the core still sends each `dedupe_key` once). |
+| `dedupe` | `daily` (default): a rule is pushed **once a day** ([Reminder state](#reminder-state)); needs a state directory approved for the plugin in `horae.lock`, or the apply fails with `state_unavailable`. `off`: every apply is pushed and no state is kept (the core still sends each `dedupe_key` once). |
 | `link_prefix` | Read by the core: a proposed `link` is routed to this entry only if it falls under it. The plugin validates it with the core's rule (an `https://` or `obsidian://` URL ending in `/`, no user info, query or fragment, a clean path: no empty, `.` or `..` segment, no `%2e %2f %5c %25`) and checks the link against it again, parsed: same scheme and host, the path under the prefix's (so `https://notes.example.org.evil.com/x` is not under `https://notes.example.org/x/`). |
 
 Any other key (a typo such as `quiet_hour`) or an invalid value fails the apply with `config_invalid`, naming the parameter, so a feature is never switched off silently.
@@ -42,7 +42,7 @@ Any other key (a typo such as `quiet_hour`) or an invalid value fails the apply 
 During the window, a push that is not `critical` is:
 
 - **`during: delay`** (default): published now with ntfy's **scheduled delivery**, so the phone receives it when quiet hours end. `delay` is sent as a **duration** (`"27000s"`, at least 30 s), not an absolute time: the ntfy server counts it on its own clock, so a clock skew between Horae and the server shifts the delivery by the skew instead of making the server refuse a time it thinks is too close or already past. If the server still refuses the scheduled publish (a 400), the apply fails with `delay_refused`; the push is **never re-sent at once**, which would wake the phone during quiet hours. The server holds the scheduled message.
-- **`during: drop`**: not sent. The apply still succeeds (the core records its `dedupe_key`), with `details.delivery: dropped`. The reminder state does **not** record it: nothing reached the phone, so the same reminder proposed by a run after quiet hours is sent then, once.
+- **`during: drop`**: not sent. The apply still succeeds (the core records its `dedupe_key`), with `details.delivery: dropped`. With `dedupe: daily` the reminder state records it like a sent push, so the same reminder proposed again right after quiet hours is not pushed then either (a dropped push is stale by design); it can be pushed a day after the drop.
 
 **Scheduled delivery needs a persistent message cache on a self-hosted server.** ntfy keeps a scheduled message in its message cache until it is due. ntfy.sh does; a self-hosted server must set `cache-file` (SQLite) or a database (`database-url`), otherwise the cache is in memory and **a restart of the server loses every scheduled message** (the notification is never delivered, and Horae has already recorded it as handled).
 
@@ -54,23 +54,30 @@ The window is read on the **local wall clock**, so daylight saving time does wha
 
 ### Duplicates
 
-The core records a notification's `dedupe_key` as sent when `apply` returns, and never sends a recorded key again. When a publish may have reached the server but `apply` failed (a timeout after the request was sent, or the host cancelling the call), the key is not recorded and a retried or re-run apply publishes it again. So every publish carries ntfy's **`sequence_id`**, derived from the `dedupe_key` (its first 32 hex characters; a key that is not hex is hashed with SHA-256 first): ntfy **replaces** a scheduled message that has the same sequence id, and a delivered one is updated in place by clients that support updating notifications, instead of showing a second copy (not verified on every client: an older app may still show both). Limits:
+The core records a notification's `dedupe_key` as sent when `apply` returns, and never sends a recorded key again; the [reminder state](#reminder-state) keeps a rule from being pushed again by later runs. Neither can be exact when a run stops **between ntfy accepting the push and the record being written** (a timeout after the request was sent, the host cancelling the call, the plugin process killed): nothing recorded the push, and the next run publishes it again. Delivery is **at least once**, not exactly once.
+
+So every publish carries ntfy's **`sequence_id`**. With `dedupe: daily` it is derived from the **rule** (the first 32 hex characters of the rule's fingerprint, below), the same in every run, so a push published again by the next run carries the same id: ntfy **replaces** a scheduled message that has the same sequence id, and a delivered one is updated in place by clients that support updating notifications, instead of showing a second copy (not verified on every client: an older app may still show both). With `dedupe: off` it is derived from the core's `dedupe_key` (its first 32 hex characters; a key that is not hex is hashed with SHA-256 first), which only covers a retry of the same run. Limits:
 
 - it needs **ntfy server v2.16 or later** (updating notifications); an older server ignores the field and the duplicate shows;
-- it is per topic: the same key on two topics is two notifications;
-- a reminder proposed again by a fresh run gets another `dedupe_key` (and so another `sequence_id`): the [reminder state](#reminder-state) is what keeps it from being pushed again.
+- it is per topic: the same rule on two topics is two notifications;
+- the same rule pushed again on a later day carries the same id too, so on a client that supports updates it replaces the previous day's notification instead of adding one.
 
 ### Reminder state
 
-The core sends a `dedupe_key` once, but a pipeline without an LLM step (the `remind` pipeline, every 5 minutes) gets **a new key every run** (the core scopes it to the run when there is no LLM `input_hash`), so the same reminder proposed again by the next run would be pushed again. With `dedupe: daily` (the default) the plugin records each push it hands to ntfy as a **(rule, local day)** pair and skips a push whose pair is already recorded: `details.delivery: duplicate`, still a success (nothing is sent, so the core records its key and moves on).
+The core sends a `dedupe_key` once, but a pipeline without an LLM step (the `remind` pipeline, every 5 minutes) gets **a new key every run** (the core scopes it to the run when there is no LLM `input_hash`), so the same reminder proposed again by the next run would be pushed again. With `dedupe: daily` (the default) the plugin records, for each **rule**, when its last push reaches the phone, and skips a push of that rule **less than a day later**: `details.delivery: duplicate`, still a success (nothing is sent, so the core records its key and moves on).
 
-- **Rule**: the entry's server, topic and priority, and the intent's title, body and link (a SHA-256 of them: no text is stored). A reminder whose text changes (another time, another title) is another rule.
-- **Day**: the local date in the instance time zone (`TZ`, set by the host from `horae.yaml`) of **delivery**: now, or when quiet hours end for a delayed push. A reminder delayed at 23:30 to 07:00 counts for the next day, so the runs of the night and of the morning after do not push it again. A reminder pushed at noon and proposed again at 23:30 is pushed for the next day (delivered at 07:00). Daylight saving time needs nothing special: the day is the local date.
-- **`critical`** pushes are sent at once and counted for today; **dropped** pushes (quiet hours, `during: drop`) are not recorded.
-- **Concurrent runs** take an exclusive lock (`flock`) around the check, the publish and the write: a second run waits (at most 30 s, longer than one publish, else `state_busy`) and then finds the first run's record. A failed publish records nothing, so the next run tries again.
-- **Storage**: `ntfy-sent.json` (mode 0600) and `ntfy-sent.lock` in the plugin's single `paths.write` directory. Written atomically (a temporary file in the same directory, flushed, renamed); opened without following symbolic links. A missing file is empty; an unreadable or malformed one starts over (`details.state: reset`: at worst a reminder is pushed once more), bad entries are dropped one by one. Entries older than 7 days are dropped on every write and at most 4096 are kept. If the push went out but the file could not be written, the apply still succeeds with `details.state: not_saved`.
+- **Rule**: the entry's server, topic and priority, and the intent's title, body and link (a SHA-256 of them: no text is stored). A reminder whose text changes (another time, another title) is another rule. So a pack must render **stable text**: a countdown ("in 25 minutes", then "in 20 minutes") is a new rule every run and is pushed every run. And **two rules with identical text collapse**: two entries or pipelines pushing the same title, body and link to the same server, topic and priority are one rule, and only the first is pushed that day (`tags` are not part of the rule). A stable rule key from the core is proposed in [horae#123](https://github.com/horae-dev/horae/issues/123).
+- **A day**: a push is a duplicate when it would reach the phone earlier than **one day after the recorded one, on the local wall clock** of the instance time zone (`TZ`, set by the host from `horae.yaml`), to the minute. That covers the same local day and also:
+  - **midnight**: pushed at 23:45, proposed again at 00:05: a duplicate (20 minutes later);
+  - **quiet hours**: a push is counted when it is **delivered**: now, or when quiet hours end for a delayed push. Pushed at noon and proposed again at 23:30 (to be delivered at 07:00): a duplicate, not a stale second push the next morning. Delayed at 23:30 to 07:00: the runs of the night and the morning are duplicates, and it is pushed again from 07:00 the next day;
+  - **no drift**: a daily reminder pushed at 12:00 is pushed again at 12:00 the next day, even when that run starts a few seconds earlier (minutes are compared), and even across a daylight saving change (a 23 or 25 hour day: the comparison is on the wall clock, not in elapsed hours).
+- **`critical`** pushes are sent at once and counted from now. **Dropped** pushes (quiet hours, `during: drop`) are recorded like sent ones, counted from the drop: the same reminder is not pushed right after quiet hours. A reminder that is proposed all day long and is first seen during quiet hours with `drop` is therefore only pushed a day after the drop.
+- **Concurrent runs** take an exclusive lock (`flock`) around the check, the publish and the write: a second run waits and then finds the first run's record. It waits **at most 8 s**: the host's call timeout (30 s by default) minus one publish (20 s at most) minus a margin, so the wait and its own publish still fit in the call. After that it fails with `state_busy`, and the next run tries again. A failed publish records nothing, so the next run tries again.
+- **Storage**: `ntfy-sent.json` (mode 0600) and `ntfy-sent.lock` in the plugin's single `paths.write` directory. The directory must **belong to the user running the plugin and not be writable by group or others** (else `state_unavailable`), and must be on a **local file system**: `flock` and `fsync` are not reliable on NFS, SMB/CIFS, FUSE mounts or Docker Desktop bind mounts from the host (macOS, Windows), so do not put it on a network share. Written atomically (a temporary file in the same directory, flushed, renamed); a temporary file left by a crash is removed after an hour. The file is opened without following symbolic links.
+- **Fail closed**: a missing file is empty. A file the plugin cannot read (permission denied, a symbolic link, not a regular file) or written in another `format` (a newer version of the plugin) is `state_unavailable`: it is never thrown away. Only corrupt or oversized content (over 1 MiB) starts over, with `details.state: reset` (at worst a reminder is pushed once more); bad entries are dropped one by one.
+- **Bounded**: one entry per rule. An entry is dropped once its delivery is more than 7 days in the past, and at most 4096 are kept (the latest deliveries); when that cap drops an entry less than 7 days old, the push reports `details.state: evicted` (that rule could be pushed again early). If the push went out but the file could not be written, the apply still succeeds with `details.state: not_saved`.
 
-The directory is approved per instance in `horae.lock`, like a self-hosted server: the manifest cannot name an absolute path that depends on where the instance lives. Give the plugin a directory of its own, for example under the instance's `state/`:
+The directory is approved per instance in `horae.lock`, like a self-hosted server: the manifest cannot name an absolute path that depends on where the instance lives. Give the plugin a directory of its own (`mkdir -m 0700`), for example under the instance's `state/`:
 
 ```yaml
 # horae.lock (excerpt)
@@ -83,7 +90,7 @@ plugins:
       intents: [notify.push]
 ```
 
-Without exactly one approved `paths.write` directory, `dedupe: daily` fails with `state_unavailable` (nothing is sent): a missing grant never silently turns into a push every 5 minutes. `dedupe: off` needs no directory.
+Without exactly one approved `paths.write` directory, `dedupe: daily` fails with `state_unavailable` and its message names this fix (nothing is sent): a missing grant never silently turns into a push every 5 minutes. `dedupe: off` needs no directory. **Upgrading from 0.1.0**, which kept no state: approve a directory as above, or set `dedupe: off` on each entry, before upgrading.
 
 ### Text and links
 
@@ -120,9 +127,9 @@ Every failure is a `SinkError` with a fixed message (never the server's answer, 
 
 | Kind | When |
 |---|---|
-| `config_invalid` | a bad or unknown entry parameter, or quiet hours or `dedupe: daily` without a usable `TZ` |
-| `state_unavailable` | `dedupe: daily` without exactly one approved `paths.write` directory, or one the plugin cannot write |
-| `state_busy` | another run held the reminder state for more than 30 s |
+| `config_invalid` | a bad or unknown entry parameter, or quiet hours or `dedupe: daily` without a usable `TZ` (the message names which) |
+| `state_unavailable` | `dedupe: daily` without exactly one approved `paths.write` directory (the message names the `horae.lock` entry to add), a directory the plugin cannot write, that another user owns or that group or others can write, or a state file it cannot read or in another format |
+| `state_busy` | another run held the reminder state (pushing to a slow server) for more than 8 s; the next run tries again |
 | `secret_missing`, `secret_invalid` | `auth: token` and `NTFY_TOKEN` is unset, or not a single printable token |
 | `intent_invalid` | the link is not an `https://` URL under `link_prefix` (or the intent is malformed) |
 | `auth_failed` | 401 or 403 |
@@ -137,7 +144,7 @@ Every failure is a `SinkError` with a fixed message (never the server's answer, 
 | `network_error` | the connection failed (retried **once**, only when it could not be made, so a push is never sent twice) |
 | `host_refused` | an `http://` server that resolves outside the LAN |
 
-**Time.** One push takes at most **20 s** (connect, the one retry when the connection could not be made, sending and reading, all under one deadline). The core applies a run's changes one after another, so a slow or unreachable server holds the rest of the apply for up to 20 s per push (head-of-line blocking). Keep `plugin_defaults.call_timeout_s` at 20 s or more (the default is 30 s): below that the host cancels a publish mid-request, the push is "maybe applied", and only the `sequence_id` keeps a re-run from duplicating it.
+**Time.** One push takes at most **20 s** (connect, the one retry when the connection could not be made, sending and reading, all under one deadline). The core applies a run's changes one after another, so a slow or unreachable server holds the rest of the apply for up to 20 s per push (head-of-line blocking). With `dedupe: daily` a run may first wait up to 8 s for another run holding the reminder state, so one apply takes at most 28 s. Keep `plugin_defaults.call_timeout_s` at 30 s (the default) or more: below that the host can cancel a publish mid-request, the push is "maybe applied", and only the `sequence_id` keeps the next run from showing it twice.
 
 The `http://` LAN restriction reaches into `httpx2` internals (the connection pool's network backend), so `httpx2` and `httpcore2` are pinned to one minor version (`2.16.x`); the plugin checks at startup that the internals are there and exits with `internal` otherwise. An `http://` host that resolves to several LAN addresses is tried on each, in order. CGNAT (`100.64.0.0/10`, e.g. Tailscale) is not LAN, as in the core's rule.
 
@@ -145,7 +152,7 @@ The HTTP client ignores the environment (`trust_env=False`: no proxy, `.netrc` o
 
 ### What `apply` returns
 
-`{"target": "<server>/<topic>", "after_sha256": null, "details": {...}}`, with `details.delivery` (`sent`, `delayed`, `dropped` or `duplicate`), `details.priority`, the ntfy message `id` when the server returns one, `until` (UTC, by Horae's clock) for a delayed push, `click: "dropped"` when an `obsidian://` link was not sent, and `state` (`reset` or `not_saved`) when the reminder state file was started over or could not be written. The core journals the notification (not undoable) and records its `dedupe_key`.
+`{"target": "<server>/<topic>", "after_sha256": null, "details": {...}}`, with `details.delivery` (`sent`, `delayed`, `dropped` or `duplicate`), `details.priority`, the ntfy message `id` when the server returns one, `until` (UTC, by Horae's clock) for a delayed push, `click: "dropped"` when an `obsidian://` link was not sent, and `state` (`reset`, `evicted` or `not_saved`) when the reminder state file was started over, had to drop a live entry to stay bounded, or could not be written. The core journals the notification (not undoable) and records its `dedupe_key`.
 
 ## Permissions
 

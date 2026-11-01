@@ -33,15 +33,22 @@ from horae_ntfy.settings import QuietHours
 _MAX_MINUTES = 26 * 60  # a window is shorter than a day; DST adds at most a couple of hours
 
 
-def zone_from_env(env: Mapping[str, str] | None = None) -> ZoneInfo:
-    """The instance time zone from `TZ` (an IANA name; a leading `:` is allowed)."""
+def zone_from_env(env: Mapping[str, str] | None = None, needed_by: str = "quiet_hours") -> ZoneInfo:
+    """The instance time zone from `TZ` (an IANA name; a leading `:` is allowed). `needed_by`
+    names the setting that needs it, for the error message."""
     name = (os.environ if env is None else env).get("TZ", "").removeprefix(":")
     if not name:
-        raise SinkError("config_invalid", "quiet_hours and dedupe need TZ (the instance time zone)")
+        raise SinkError(
+            "config_invalid",
+            f"{needed_by} needs TZ, the instance time zone (the host sets it from horae.yaml"
+            " timezone)",
+        )
     try:
         return ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError):
-        raise SinkError("config_invalid", "TZ is not a known IANA time zone") from None
+        raise SinkError(
+            "config_invalid", f"{needed_by} needs TZ, which is not a known IANA time zone"
+        ) from None
 
 
 def in_window(wall: time, window: QuietHours) -> bool:

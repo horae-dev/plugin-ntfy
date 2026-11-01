@@ -13,7 +13,7 @@ A pipeline's `notify` entry configures the notifier:
         auth: token                        # token (default: NTFY_TOKEN, Bearer) | none
         quiet_hours: { start: "22:00", end: "07:00", during: delay }   # during: delay | drop
         link_prefix: https://notes.example.org/daily/                  # read by the core
-        dedupe: daily                      # daily (default): once per rule and local day | off
+        dedupe: daily                      # daily (default): once a day per rule | off
 ```
 
 These parameters are **trusted** (the pipeline author's, never a proposer's), but a typo must
@@ -102,7 +102,7 @@ class Settings:
     quiet_hours: QuietHours | None
     link_prefix: str | None
     dedupe: Literal["daily", "off"] = "daily"
-    """`daily`: once per rule and local day (`horae_ntfy.state`); `off`: every apply."""
+    """`daily`: once a day per rule (`horae_ntfy.state`); `off`: every apply."""
 
     @property
     def ntfy_priority(self) -> int:

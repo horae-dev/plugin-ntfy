@@ -2,7 +2,7 @@
 # checks it is what the SDK writes. When installing, pin runtime.command to an absolute
 # interpreter that has this package (horae-sdk README, "The command").
 name: ntfy
-version: 0.1.0
+version: 0.2.0
 horae: '>=0,<0.2'
 description: Sends Horae notifications through ntfy, with priorities and quiet hours.
 license: Apache-2.0
