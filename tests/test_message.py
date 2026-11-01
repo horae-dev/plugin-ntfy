@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The publish payload: hostile titles and bodies neutralised, only checked links clicked."""
 
+import hashlib
 import re
 from typing import Any
 
@@ -62,7 +63,7 @@ def test_a_delay_is_a_duration_in_seconds() -> None:
 
 
 def test_the_sequence_id_comes_from_the_dedupe_key() -> None:
-    key = "0123456789abcdef" * 4  # the core's keys: SHA-256 hex
+    key = hashlib.sha256(b"a notification").hexdigest()  # the core's keys: SHA-256 hex
     message = payload(push(), SETTINGS, delay_s=None, dedupe_key=key)
     assert message["sequence_id"] == key[:32]
     assert "sequence_id" not in payload(push(), SETTINGS, delay_s=None)
