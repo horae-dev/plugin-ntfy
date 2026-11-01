@@ -13,6 +13,7 @@ A pipeline's `notify` entry configures the notifier:
         auth: token                        # token (default: NTFY_TOKEN, Bearer) | none
         quiet_hours: { start: "22:00", end: "07:00", during: delay }   # during: delay | drop
         link_prefix: https://notes.example.org/daily/                  # read by the core
+        dedupe: daily                      # daily (default): once a day per rule | off
 ```
 
 These parameters are **trusted** (the pipeline author's, never a proposer's), but a typo must
@@ -20,6 +21,7 @@ not silently turn a feature off (`quiet_hour:` would disable quiet hours), so an
 or invalid value is `SinkError("config_invalid")`, naming the parameter and never echoing its
 value. `link_prefix` is the core's (it routes a `link` only under it); it is checked here with
 the core's rule (`check_link_prefix`) and the notifier checks the link against it again.
+`dedupe: daily` keeps the reminder state (`horae_ntfy.state`); `off` sends every apply.
 
 **Server.** With `auth: token` the `server` is **required**: the token is never sent to a
 default host the pipeline author did not write down. Only `auth: none` defaults to
@@ -51,7 +53,16 @@ PRIORITIES: dict[str, int] = {"min": 1, "low": 2, "normal": 3, "high": 4, "criti
 CRITICAL = "critical"
 MAX_TAGS = 8
 
-_KEYS = {"server", "topic", "priority", "tags", "auth", "quiet_hours", "link_prefix"}
+_KEYS = {
+    "server",
+    "topic",
+    "priority",
+    "tags",
+    "auth",
+    "quiet_hours",
+    "link_prefix",
+    "dedupe",
+}
 _QUIET_KEYS = {"start", "end", "during"}
 _TOPIC = re.compile(r"[-_A-Za-z0-9]{1,64}")  # ntfy's own topic rule
 _TAG = re.compile(r"[a-z0-9+][a-z0-9_+-]{0,31}")
@@ -90,6 +101,8 @@ class Settings:
     auth: Literal["token", "none"]
     quiet_hours: QuietHours | None
     link_prefix: str | None
+    dedupe: Literal["daily", "off"] = "daily"
+    """`daily`: once a day per rule (`horae_ntfy.state`); `off`: every apply."""
 
     @property
     def ntfy_priority(self) -> int:
@@ -225,6 +238,9 @@ def parse(params: dict[str, Any]) -> Settings:
         raise _invalid(
             "link_prefix", "must be an https:// or obsidian:// URL with a clean path ending in /"
         )
+    dedupe = params.get("dedupe", "daily")
+    if dedupe not in ("daily", "off"):
+        raise _invalid("dedupe", "must be daily or off")
     return Settings(
         server=server,
         scheme=scheme,
@@ -235,4 +251,5 @@ def parse(params: dict[str, Any]) -> Settings:
         auth="token" if auth == "token" else "none",
         quiet_hours=_quiet(params.get("quiet_hours")),
         link_prefix=prefix,
+        dedupe="daily" if dedupe == "daily" else "off",
     )

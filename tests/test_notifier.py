@@ -2,6 +2,7 @@
 """`ntfy.push` end to end against a fake ntfy server: delivery, headers, auth, priorities,
 quiet hours (with a fake clock) and the critical bypass."""
 
+import dataclasses
 import math
 from datetime import UTC, datetime
 from typing import Any
@@ -20,9 +21,12 @@ from fakes import (
     env,
     lan_notifier,
     recorded_notifier,
+    state_paths,
 )
 from horae_ntfy.message import sequence_id
 from horae_ntfy.plugin import NtfyNotifier
+from horae_ntfy.settings import parse
+from horae_ntfy.state import rule_fingerprint
 
 NIGHT = {"start": "22:00", "end": "07:00"}
 # 2026-10-29 23:30 in Paris (CET, UTC+1) is 22:30 UTC; the night ends at 06:00 UTC.
@@ -32,7 +36,7 @@ MORNING = datetime(2026, 10, 30, 6, 0, tzinfo=UTC)
 
 def request(params: dict[str, Any], **intent: Any) -> ApplyRequest:
     return ApplyRequest(
-        Paths(),
+        state_paths(),
         {"type": "notify.push", "title": "Today", "body": "3 tasks due", "link": None, **intent},
         tool="ntfy.push",
         params=params,
@@ -40,6 +44,12 @@ def request(params: dict[str, Any], **intent: Any) -> ApplyRequest:
         index=0,
         dedupe_key="k" * 64,
     )
+
+
+def rule_sequence(params: dict[str, Any], **intent: Any) -> str | None:
+    """The sequence id of the rule `request(params, **intent)` pushes (`dedupe: daily`)."""
+    pushed = {"title": "Today", "body": "3 tasks due", "link": None, **intent}
+    return sequence_id(rule_fingerprint(parse(params), pushed))
 
 
 def apply(notifier: NtfyNotifier, params: dict[str, Any], **intent: Any) -> Applied:
@@ -61,7 +71,7 @@ def test_delivers_over_http_to_the_lan_server(ntfy: FakeNtfy) -> None:
         "message": "3 tasks due",
         "title": "Today",
         "priority": 3,
-        "sequence_id": sequence_id("k" * 64),
+        "sequence_id": rule_sequence({"server": ntfy.url, "topic": "reminders"}),
     }
     assert seen.headers["host"] == f"{HOST}:{ntfy.port}"
     assert seen.headers["authorization"] == f"Bearer {TOKEN}"
@@ -252,29 +262,39 @@ def test_a_400_to_a_delayed_push_is_delay_refused_and_not_sent_now(ntfy: FakeNtf
 # --- deduplication ----------------------------------------------------------------------------
 
 
-def test_the_same_dedupe_key_sends_the_same_sequence_id() -> None:
-    """A retried or re-run apply of one notification replaces it on the server and the phone
-    (ntfy's sequence_id) instead of adding a copy; another key gets another id."""
+def test_the_same_rule_sends_the_same_sequence_id() -> None:
+    """With `dedupe: daily` the sequence id comes from the rule, not from the core's per-run
+    `dedupe_key`: a push sent again by another run after an ambiguous failure replaces the
+    first one on the server and the phone; another rule gets another id."""
     recorder = Recorder()
-    notifier = recorded_notifier(recorder)
     params = {"server": "https://ntfy.example.org", "topic": "t"}
-    apply(notifier, params)
-    apply(notifier, params)
-    first, again = recorder.json(0)["sequence_id"], recorder.json(1)["sequence_id"]
-    assert first == again == sequence_id("k" * 64)
+    apply(recorded_notifier(recorder), params)
+    other_run = dataclasses.replace(request(params), dedupe_key="a" * 64)
 
-    async def other() -> None:
-        intent = {"type": "notify.push", "body": "x", "link": None}
-        call = ApplyRequest(Paths(), intent, tool="ntfy.push", params=params, dedupe_key="a" * 64)
-        await notifier.apply(call)
+    async def again() -> None:
+        await recorded_notifier(recorder).apply(other_run)
 
-    anyio.run(other)
-    assert recorder.json(2)["sequence_id"] == "a" * 32
+    anyio.run(again)
+    first, second = recorder.json(0)["sequence_id"], recorder.json(1)["sequence_id"]
+    assert first == second == rule_sequence(params)
+    assert first != sequence_id("k" * 64)
+    apply(recorded_notifier(recorder), params, body="another")
+    assert recorder.json(2)["sequence_id"] == rule_sequence(params, body="another") != first
+
+
+def test_dedupe_off_takes_the_sequence_id_from_the_dedupe_key() -> None:
+    recorder = Recorder()
+    apply(
+        recorded_notifier(recorder),
+        {"server": "https://ntfy.example.org", "topic": "t", "dedupe": "off"},
+    )
+    assert recorder.json(0)["sequence_id"] == sequence_id("k" * 64)
 
 
 def test_a_delayed_push_keeps_its_sequence_id(ntfy: FakeNtfy) -> None:
-    apply(lan_notifier(now=LATE), {"server": ntfy.url, "topic": "t", "quiet_hours": NIGHT})
-    assert ntfy.seen[0].json()["sequence_id"] == sequence_id("k" * 64)
+    params = {"server": ntfy.url, "topic": "t", "quiet_hours": NIGHT}
+    apply(lan_notifier(now=LATE), params)
+    assert ntfy.seen[0].json()["sequence_id"] == rule_sequence(params)
 
 
 def test_an_obsidian_link_is_reported_as_a_dropped_click(ntfy: FakeNtfy) -> None:
@@ -306,10 +326,8 @@ def test_a_critical_push_ignores_quiet_hours(ntfy: FakeNtfy, during: str) -> Non
 
 def test_a_critical_push_needs_no_time_zone(ntfy: FakeNtfy) -> None:
     environ = {"NTFY_TOKEN": TOKEN}
-    apply(
-        lan_notifier(now=LATE, environ=environ),
-        {"server": ntfy.url, "topic": "t", "priority": "critical", "quiet_hours": NIGHT},
-    )
+    params = {"server": ntfy.url, "topic": "t", "priority": "critical", "quiet_hours": NIGHT}
+    apply(lan_notifier(now=LATE, environ=environ), {**params, "dedupe": "off"})
     assert len(ntfy.seen) == 1
 
 

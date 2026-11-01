@@ -11,9 +11,19 @@ import anyio
 import httpcore2
 import httpx2
 import pytest
-from horae_sdk import Applied, ApplyRequest, Paths, SinkError
+from horae_sdk import Applied, ApplyRequest, SinkError
 
-from fakes import TOKEN, Behaviour, FakeNtfy, Recorder, lan_notifier, loopback, recorded_notifier
+from fakes import (
+    TOKEN,
+    Behaviour,
+    FakeNtfy,
+    Recorder,
+    env,
+    lan_notifier,
+    loopback,
+    recorded_notifier,
+    state_paths,
+)
 from horae_ntfy.http import (
     MAX_RESPONSE_BYTES,
     LanOnlyNetwork,
@@ -30,7 +40,7 @@ from horae_ntfy.settings import parse
 
 def push(params: dict[str, Any]) -> ApplyRequest:
     intent = {"type": "notify.push", "title": "T", "body": "B", "link": None}
-    return ApplyRequest(Paths(), intent, tool="ntfy.push", params=params)
+    return ApplyRequest(state_paths(), intent, tool="ntfy.push", params=params)
 
 
 def apply(notifier: NtfyNotifier, params: dict[str, Any]) -> Applied:
@@ -111,7 +121,7 @@ def test_an_http_server_off_the_lan_is_refused() -> None:
     async def public(host: str, port: int) -> list[str]:
         return ["93.184.215.14", "10.0.0.2"]
 
-    notifier = NtfyNotifier(Publisher(resolver=public), env={"NTFY_TOKEN": TOKEN})
+    notifier = NtfyNotifier(Publisher(resolver=public), env=env())
     error = failure(notifier, {"server": "http://ntfy.example.org", "topic": "t"})
     assert error.kind == "host_refused"
 
@@ -133,9 +143,7 @@ def test_addresses_off_the_lan(address: str) -> None:
 
 
 def test_an_unknown_lan_host_is_a_network_error() -> None:
-    notifier = NtfyNotifier(
-        Publisher(resolver=loopback, retry_pause_s=0.0), env={"NTFY_TOKEN": TOKEN}
-    )
+    notifier = NtfyNotifier(Publisher(resolver=loopback, retry_pause_s=0.0), env=env())
     error = failure(notifier, {"server": "http://unknown.example.org", "topic": "t"})
     assert error.kind == "network_error"
 
@@ -145,7 +153,7 @@ def test_a_slow_resolver_is_a_timeout() -> None:
         await anyio.sleep(10)
         return []  # pragma: no cover
 
-    notifier = NtfyNotifier(Publisher(resolver=stuck, deadline_s=0.2), env={"NTFY_TOKEN": TOKEN})
+    notifier = NtfyNotifier(Publisher(resolver=stuck, deadline_s=0.2), env=env())
     error = failure(notifier, {"server": "http://ntfy.example.org", "topic": "t"})
     assert error.kind == "server_timeout"
 

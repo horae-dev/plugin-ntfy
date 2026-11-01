@@ -18,7 +18,7 @@ import anyio
 import pytest
 from horae_sdk.testing import CI_ENVS, RECORD_ENV, operation
 
-from fakes import TOKEN, Recorder, recorded_notifier
+from fakes import TOKEN, Recorder, recorded_notifier, state_paths
 from horae_ntfy import TOOL, build
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pushes.json"
@@ -38,7 +38,7 @@ def replay(case: dict[str, Any]) -> dict[str, Any]:
     notifier = recorded_notifier(recorder, now=datetime.fromisoformat(case["now"]))
     plugin = build(notifier)
     arguments = {
-        "paths": {"read": [], "write": []},
+        "paths": state_paths().to_wire(),
         "intent": case["intent"],
         "tool": TOOL,
         "params": case["params"],

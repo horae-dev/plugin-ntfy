@@ -35,8 +35,9 @@ refuses the push otherwise (`intent_invalid`): no other URL ever becomes a click
 An `obsidian://` link is not sent as the click action in this version (deep links and action
 buttons are story #4): the notification goes out without one (`details.click: "dropped"`).
 
-**`sequence_id`** (`sequence_id`) is derived from the notification's `dedupe_key`, so a
-publish of the same notification replaces the earlier one; **`delay`** is a duration
+**`sequence_id`** (`sequence_id`) is derived from a key the notifier passes (the rule's
+fingerprint with `dedupe: daily`, the core's `dedupe_key` with `off`), so a publish of the
+same rule or notification replaces the earlier one; **`delay`** is a duration
 (`"<n>s"`), counted by the server's own clock.
 """
 
@@ -186,10 +187,11 @@ def click_url(link: object, settings: Settings) -> str | None:
 
 
 def sequence_id(dedupe_key: str | None) -> str | None:
-    """ntfy's `sequence_id` for the notification `dedupe_key`: its first 32 characters when it
-    is already lowercase hex (the core's keys are SHA-256 hex digests), else the first 32 hex
-    characters of its SHA-256. Within ntfy's rule (`[-_A-Za-z0-9]{1,64}`), stable for a key,
-    so publishing the same notification again replaces it instead of adding a copy."""
+    """ntfy's `sequence_id` for `dedupe_key` (a rule fingerprint or the core's key): its first
+    32 characters when it is already lowercase hex (both are SHA-256 hex digests), else the
+    first 32 hex characters of its SHA-256. Within ntfy's rule (`[-_A-Za-z0-9]{1,64}`) and
+    stable for a key, so publishing the same rule or notification again replaces it instead
+    of adding a copy."""
     if dedupe_key is None:
         return None
     if _HEX.fullmatch(dedupe_key):
