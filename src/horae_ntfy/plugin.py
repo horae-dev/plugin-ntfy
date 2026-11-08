@@ -37,11 +37,17 @@ instance time zone, `TZ`), a push that is not `critical` is:
 Either way `apply` succeeds, so the core records the notification as handled and will not
 send that `dedupe_key` again. A `critical` push is always sent at once.
 
-**Once a day per rule.** With `dedupe: daily` (the default) a push of a rule (the entry and
-the intent's text) is not sent again within a day of the last one, on the local wall clock
-(`delivery: duplicate`), whatever its `dedupe_key`: the core gives a pipeline without an LLM
-step a new key every run. `horae_ntfy.state` keeps that record in the plugin's approved
-`paths.write` directory.
+**Keyed pushes.** An intent with a `key` (`notify.push`'s optional stable key) has a core
+`dedupe_key` scoped to the pipeline, the entry, the key and the local day: the core sends it
+once a day however many runs propose it, and later ones are `duplicate` in the core. This
+plugin then keeps no reminder state for that push (whatever `dedupe` says, and without a
+state directory) and derives ntfy's `sequence_id` from the core's `dedupe_key`.
+
+**Once a day per rule.** For an unkeyed push, with `dedupe: daily` (the default), a push of a
+rule (the entry and the intent's text) is not sent again within a day of the last one, on the
+local wall clock (`delivery: duplicate`), whatever its `dedupe_key`:
+the core gives a pipeline without an LLM step a new key every run. `horae_ntfy.state` keeps
+that record in the plugin's approved `paths.write` directory.
 
 **What `apply` returns** (`Applied`): the target `<server>/<topic>` and `details`:
 `delivery` (`sent`, `delayed`, `dropped` or `duplicate`); `priority`; the ntfy message `id`
@@ -158,7 +164,11 @@ class NtfyNotifier(Notifier):
                 else:
                     details["delivery"] = "delayed"
                     delivery = delay_until
-        daily = settings.dedupe == "daily"
+        # A keyed intent (`key`, core #137) has a `dedupe_key` scoped to (pipeline, entry, key,
+        # local day) by the core: it sends the push once a day however many runs propose it,
+        # so the plugin keeps no state for it and its sequence id comes from that key.
+        keyed = request.intent.get("key") is not None and request.dedupe_key is not None
+        daily = settings.dedupe == "daily" and not keyed
         rule = rule_fingerprint(settings, request.intent)
         # The sequence id of a rule is the same in every run (`dedupe: daily`), so a push sent
         # again after an ambiguous failure replaces the first one on ntfy.

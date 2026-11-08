@@ -4,6 +4,7 @@ quiet hours (with a fake clock) and the critical bypass."""
 
 import dataclasses
 import math
+import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -289,6 +290,57 @@ def test_dedupe_off_takes_the_sequence_id_from_the_dedupe_key() -> None:
         {"server": "https://ntfy.example.org", "topic": "t", "dedupe": "off"},
     )
     assert recorder.json(0)["sequence_id"] == sequence_id("k" * 64)
+
+
+def test_a_keyed_push_takes_its_sequence_id_from_the_core_key_and_keeps_no_state() -> None:
+    """The core scopes a keyed intent's `dedupe_key` to the day: the plugin neither reads nor
+    writes its reminder state for it (so a repeat within a day is the core's `duplicate`)."""
+    recorder = Recorder()
+    params = {"server": "https://ntfy.example.org", "topic": "t"}  # dedupe: daily
+    keyed = request(params, key="rem:abc:2026-10-29T15:00")
+    paths = keyed.paths
+
+    async def go(call: ApplyRequest) -> Applied:
+        return await recorded_notifier(recorder).apply(call)
+
+    first = anyio.run(go, keyed)
+    assert first.details["delivery"] == "sent"
+    assert recorder.json(0)["sequence_id"] == sequence_id("k" * 64)
+    assert recorder.json(0)["sequence_id"] != rule_sequence(params)
+    # No state was written; and a second apply with the same paths is not suppressed by it.
+    assert [os.listdir(directory) for directory in paths.write] == [[]]
+    again = anyio.run(go, dataclasses.replace(keyed, dedupe_key="b" * 64))
+    assert again.details["delivery"] == "sent"
+    assert recorder.json(1)["sequence_id"] == sequence_id("b" * 64)
+
+
+def test_a_keyed_push_needs_no_state_directory() -> None:
+    recorder = Recorder()
+    params = {"server": "https://ntfy.example.org", "topic": "t"}
+    keyed = dataclasses.replace(request(params, key="digest:2026-10-29"), paths=Paths())
+    applied = anyio.run(recorded_notifier(recorder).apply, keyed)
+    assert applied.details["delivery"] == "sent"
+    # The same push without a key still needs it.
+    with pytest.raises(SinkError) as raised:
+        anyio.run(
+            recorded_notifier(recorder).apply, dataclasses.replace(request(params), paths=Paths())
+        )
+    assert raised.value.kind == "state_unavailable"
+
+
+def test_an_unkeyed_push_keeps_the_daily_rule_state() -> None:
+    recorder = Recorder()
+    params = {"server": "https://ntfy.example.org", "topic": "t"}
+    plain = request(params)
+
+    async def go(call: ApplyRequest) -> Applied:
+        return await recorded_notifier(recorder).apply(call)
+
+    assert anyio.run(go, plain).details["delivery"] == "sent"
+    assert anyio.run(go, dataclasses.replace(plain, dedupe_key="c" * 64)).details == {
+        "delivery": "duplicate",
+        "priority": 3,
+    }
 
 
 def test_a_delayed_push_keeps_its_sequence_id(ntfy: FakeNtfy) -> None:
