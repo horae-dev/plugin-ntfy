@@ -46,8 +46,8 @@ confirmation page). A button that fails the check refuses the push (`intent_inva
 fixed text: **the URL is never put in an error, a log or the result**.
 
 **`sequence_id`** (`sequence_id`) is derived from a key the notifier passes (the rule's
-fingerprint with `dedupe: daily`, the core's `dedupe_key` with `off`), so a publish of the
-same rule or notification replaces the earlier one; **`delay`** is a duration
+fingerprint with `dedupe: daily`, the core's `dedupe_key` with `off` or for a keyed intent),
+so a publish of the same rule or notification replaces the earlier one; **`delay`** is a duration
 (`"<n>s"`), counted by the server's own clock.
 """
 

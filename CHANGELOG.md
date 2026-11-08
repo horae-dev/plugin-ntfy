@@ -2,6 +2,9 @@
 
 ## 0.3.0 (unreleased)
 
+- A `notify.push` with a `key` (core #137) uses the core's day-scoped `dedupe_key`: the plugin keeps
+  no reminder state for it (`dedupe: daily` still applies to unkeyed pushes) and derives ntfy's
+  `sequence_id` from that key. Needs no state directory.
 - Done / Snooze buttons: the buttons the core mints for a `notify.push` (`ApplyRequest.actions`,
   horae-sdk 0.3) are sent as ntfy `http` actions (at most 3, each re-checked; the URLs are
   credentials and never logged). New entry parameter `actions: http | view | off` (default
