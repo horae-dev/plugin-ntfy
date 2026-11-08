@@ -14,6 +14,7 @@ A pipeline's `notify` entry configures the notifier:
         quiet_hours: { start: "22:00", end: "07:00", during: delay }   # during: delay | drop
         link_prefix: https://notes.example.org/daily/                  # read by the core
         dedupe: daily                      # daily (default): once a day per rule | off
+        actions: http                      # http (default): Done/Snooze buttons POST | view | off
 ```
 
 These parameters are **trusted** (the pipeline author's, never a proposer's), but a typo must
@@ -62,6 +63,7 @@ _KEYS = {
     "quiet_hours",
     "link_prefix",
     "dedupe",
+    "actions",
 }
 _QUIET_KEYS = {"start", "end", "during"}
 _TOPIC = re.compile(r"[-_A-Za-z0-9]{1,64}")  # ntfy's own topic rule
@@ -103,6 +105,10 @@ class Settings:
     link_prefix: str | None
     dedupe: Literal["daily", "off"] = "daily"
     """`daily`: once a day per rule (`horae_ntfy.state`); `off`: every apply."""
+    actions: Literal["http", "view", "off"] = "http"
+    """The core's minted buttons as ntfy `http` actions (one tap POSTs), as `view` actions
+    (opens the confirmation page in the browser: the fallback if a phone's http actions fail)
+    or not at all."""
 
     @property
     def ntfy_priority(self) -> int:
@@ -241,6 +247,9 @@ def parse(params: dict[str, Any]) -> Settings:
     dedupe = params.get("dedupe", "daily")
     if dedupe not in ("daily", "off"):
         raise _invalid("dedupe", "must be daily or off")
+    actions = params.get("actions", "http")
+    if actions not in ("http", "view", "off"):
+        raise _invalid("actions", "must be http, view or off")
     return Settings(
         server=server,
         scheme=scheme,
@@ -252,4 +261,5 @@ def parse(params: dict[str, Any]) -> Settings:
         quiet_hours=_quiet(params.get("quiet_hours")),
         link_prefix=prefix,
         dedupe="daily" if dedupe == "daily" else "off",
+        actions="http" if actions == "http" else "view" if actions == "view" else "off",
     )

@@ -32,8 +32,18 @@ entry's trusted `link_prefix`; the notifier checks it again with the core's rule
 same scheme and host as `link_prefix`, its path under the prefix's, and the rest of the path
 clean: no `.` or `..` segment, no `%2e %2f %5c %25`; no user info, spaces or controls) and
 refuses the push otherwise (`intent_invalid`): no other URL ever becomes a click target.
-An `obsidian://` link is not sent as the click action in this version (deep links and action
-buttons are story #4): the notification goes out without one (`details.click: "dropped"`).
+An `obsidian://` link is the click action too when the entry's `link_prefix` is an
+`obsidian://` prefix and the link is under it (same checks); with any other `link_prefix` it is
+not sent and the notification goes out without a click (`details.click: "dropped"`).
+
+**Action buttons** (`ApplyRequest.actions`) are the `{"action": "http", "label", "url",
+"method": "POST"}` objects the core minted for the intent's `actions` (each `url` is a signed,
+single-use `/act` link: a bearer credential). They are checked again (`action_buttons`: `http`,
+`POST`, an `https://` URL of at most `MAX_LINK` characters with no user info, space or
+control, a plain-text label of at most `MAX_LABEL` characters), cut to ntfy's three, and
+sent as ntfy `http` actions, or with `actions: view` as `view` actions (the browser opens the
+confirmation page). A button that fails the check refuses the push (`intent_invalid`) with a
+fixed text: **the URL is never put in an error, a log or the result**.
 
 **`sequence_id`** (`sequence_id`) is derived from a key the notifier passes (the rule's
 fingerprint with `dedupe: daily`, the core's `dedupe_key` with `off`), so a publish of the
@@ -44,6 +54,7 @@ same rule or notification replaces the earlier one; **`delay`** is a duration
 import hashlib
 import re
 import unicodedata
+from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -54,6 +65,8 @@ from horae_ntfy.settings import Settings, clean_path
 MAX_BODY_BYTES = 4096
 MAX_TITLE = 250
 MAX_LINK = 2048
+MAX_LABEL = 40
+MAX_ACTIONS = 3  # ntfy's own limit
 SEQUENCE_ID_LENGTH = 32
 _HEX = re.compile(r"[0-9a-f]{32,64}")
 EMPTY_BODY = "(no text)"
@@ -166,24 +179,73 @@ def is_obsidian(link: object) -> bool:
 
 
 def click_url(link: object, settings: Settings) -> str | None:
-    """The click action: the intent's `https://` link, checked again; `None` for no link or an
-    `obsidian://` one (story #4)."""
-    if link is None or is_obsidian(link):
+    """The click action: the intent's link, checked again against `link_prefix`; `None` for no
+    link, or for an `obsidian://` one when `link_prefix` is not an `obsidian://` prefix."""
+    if link is None:
+        return None
+    prefix = settings.link_prefix
+    scheme = "obsidian" if is_obsidian(link) else "https"
+    if scheme == "obsidian" and (prefix is None or not prefix.startswith("obsidian://")):
         return None
     if not isinstance(link, str) or len(link) > MAX_LINK:
         raise SinkError("intent_invalid", "the notification link is not a string URL")
-    if any(ch <= " " or ch == "\x7f" for ch in link) or not link.startswith("https://"):
+    if any(ch <= " " or ch == "\x7f" for ch in link) or not link.startswith(f"{scheme}://"):
         raise SinkError("intent_invalid", "the notification link is not an https:// URL")
     try:
         parts = urlsplit(link)
     except ValueError:
         raise SinkError("intent_invalid", "the notification link is not a valid URL") from None
-    if not parts.hostname or "@" in parts.netloc or "\\" in link:
+    if not parts.netloc or "@" in parts.netloc or "\\" in link:
         raise SinkError("intent_invalid", "the notification link has no host or has user info")
-    prefix = settings.link_prefix
-    if prefix is None or not prefix.startswith("https://") or not _under(link, prefix):
+    if scheme == "https" and not parts.hostname:
+        raise SinkError("intent_invalid", "the notification link has no host or has user info")
+    if prefix is None or not prefix.startswith(f"{scheme}://") or not _under(link, prefix):
         raise SinkError("intent_invalid", "the notification link is not under link_prefix")
     return link
+
+
+def _button_error(why: str) -> SinkError:
+    # Fixed texts: the button's URL is a credential and must not leak into an error.
+    return SinkError("intent_invalid", f"an action button {why}")
+
+
+def _button(item: object, mode: str) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise _button_error("is not an object")
+    label, url = item.get("label"), item.get("url")
+    if item.get("action") != "http" or item.get("method") != "POST":
+        raise _button_error("is not an http POST action")
+    if (
+        not isinstance(label, str)
+        or not 1 <= len(label) <= MAX_LABEL
+        or any(unicodedata.category(ch) in ("Cc", "Cf", "Cs", "Zl", "Zp") for ch in label)
+    ):
+        raise _button_error("has an invalid label")
+    if (
+        not isinstance(url, str)
+        or len(url) > MAX_LINK
+        or not url.startswith("https://")
+        or any(ch <= " " or ch == "\x7f" or ch == "\\" for ch in url)
+    ):
+        raise _button_error("has an invalid URL")
+    try:
+        parts = urlsplit(url)
+        valid = bool(parts.hostname) and "@" not in parts.netloc
+    except ValueError:
+        valid = False
+    if not valid:
+        raise _button_error("has an invalid URL")
+    if mode == "view":
+        return {"action": "view", "label": label, "url": url}
+    return {"action": "http", "label": label, "url": url, "method": "POST"}
+
+
+def action_buttons(requested: Sequence[object], settings: Settings) -> list[dict[str, Any]]:
+    """ntfy `actions` for the core's minted buttons (at most `MAX_ACTIONS`, each checked);
+    none with `actions: off`."""
+    if settings.actions == "off":
+        return []
+    return [_button(item, settings.actions) for item in list(requested)[:MAX_ACTIONS]]
 
 
 def sequence_id(dedupe_key: str | None) -> str | None:
@@ -205,8 +267,10 @@ def payload(
     *,
     delay_s: int | None,
     dedupe_key: str | None = None,
+    actions: Sequence[object] = (),
 ) -> dict[str, Any]:
-    """The JSON publish body for `intent` (already validated by the core: checked again)."""
+    """The JSON publish body for `intent` (already validated by the core: checked again) and
+    the core's minted `actions`."""
     body, title = intent.get("body"), intent.get("title")
     if not isinstance(body, str) or not (title is None or isinstance(title, str)):
         raise SinkError("intent_invalid", "a notify.push needs a text body")
@@ -223,6 +287,9 @@ def payload(
     click = click_url(intent.get("link"), settings)
     if click is not None:
         message["click"] = click
+    buttons = action_buttons(actions, settings)
+    if buttons:
+        message["actions"] = buttons
     if delay_s is not None:
         message["delay"] = f"{delay_s}s"  # a duration: the server's clock, not ours, counts it
     sequence = sequence_id(dedupe_key)

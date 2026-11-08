@@ -46,7 +46,9 @@ step a new key every run. `horae_ntfy.state` keeps that record in the plugin's a
 **What `apply` returns** (`Applied`): the target `<server>/<topic>` and `details`:
 `delivery` (`sent`, `delayed`, `dropped` or `duplicate`); `priority`; the ntfy message `id`
 when the server gave one; `until`, the UTC time a delayed push is due by this host's clock;
-`click: "dropped"` when the intent's `obsidian://` link was not sent, until story #4; `state`
+`click: "dropped"` when the intent's `obsidian://` link was not sent (its `link_prefix` is not an
+`obsidian://` one); `actions`, the number of buttons sent (never their URLs: each is a
+single-use credential); `state`
 (`reset`, `evicted` or `not_saved`) when the reminder state was started over, had to drop a
 live entry to stay bounded, or could not be written. Nothing in it comes from the proposer's
 text, and the token is never in it.
@@ -75,7 +77,7 @@ from horae_ntfy.state import (
 
 NAME = "ntfy"
 """The plugin's name, also the namespace of its refs (`ntfy.push`)."""
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 TOOL = f"{NAME}.push"
 COMMAND = ["python3", "-m", "horae_ntfy"]
 """`runtime.command` of `plugin.yaml`. When installing, pin an absolute interpreter that has
@@ -162,9 +164,17 @@ class NtfyNotifier(Notifier):
         # again after an ambiguous failure replaces the first one on ntfy.
         sequence_key = rule if daily else request.dedupe_key
         # Built (and the intent checked) even when dropped: a bad intent fails the same way.
-        message = payload(request.intent, settings, delay_s=delay_s, dedupe_key=sequence_key)
-        if is_obsidian(request.intent.get("link")):
+        message = payload(
+            request.intent,
+            settings,
+            delay_s=delay_s,
+            dedupe_key=sequence_key,
+            actions=request.actions,
+        )
+        if is_obsidian(request.intent.get("link")) and "click" not in message:
             details["click"] = "dropped"
+        if "actions" in message:
+            details["actions"] = len(message["actions"])  # the count only: URLs are credentials
         dropped = details["delivery"] == "dropped"
         if not daily:
             if not dropped:

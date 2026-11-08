@@ -33,6 +33,7 @@ Horae plugin: push notifications through ntfy, with digests, reminders, quiet ho
 | `auth` | `token`: send `NTFY_TOKEN` as `Authorization: Bearer`; missing is an error, never a silent anonymous publish. `none`: send no credentials. |
 | `quiet_hours` | `start` and `end` as `"HH:MM"`, local times in the instance time zone (`horae.yaml` `timezone`, which the host passes as `TZ`); `start > end` crosses midnight. See below. |
 | `dedupe` | `daily` (default): a rule is pushed **once a day** ([Reminder state](#reminder-state)); needs a state directory approved for the plugin in `horae.lock`, or the apply fails with `state_unavailable`. `off`: every apply is pushed and no state is kept (the core still sends each `dedupe_key` once). |
+| `actions` | `http` (default): the Done / Snooze buttons the core minted for the intent are sent as ntfy `http` actions (one tap POSTs the signed link); `view`: the same links as ntfy `view` actions (the tap opens the core's confirmation page in the browser: the fallback if a phone's http actions do not work); `off`: no buttons. See "Action buttons". |
 | `link_prefix` | Read by the core: a proposed `link` is routed to this entry only if it falls under it. The plugin validates it with the core's rule (an `https://` or `obsidian://` URL ending in `/`, no user info, query or fragment, a clean path: no empty, `.` or `..` segment, no `%2e %2f %5c %25`) and checks the link against it again, parsed: same scheme and host, the path under the prefix's (so `https://notes.example.org.evil.com/x` is not under `https://notes.example.org/x/`). |
 
 Any other key (a typo such as `quiet_hour`) or an invalid value fails the apply with `config_invalid`, naming the parameter, so a feature is never switched off silently.
@@ -101,9 +102,23 @@ The intent's title and body are untrusted text, sent as plain text in the JSON p
 - the tag characters of a subdivision flag (🏴 followed by tag letters, e.g. the flag of Scotland) are kept; tag characters anywhere else are removed;
 - the body is cut to 4096 bytes of UTF-8 (ntfy's default message limit) and the title to **250 characters**, with `…`. ntfy (from v2.28) refuses a title over 1 KB of UTF-8, and 250 characters are at most 1000 bytes; a phone shows only a line or two of a title anyway. The cut never splits a character from its combining marks, variation selector or skin tone, a ZWJ sequence (no dangling joiner), the two regional indicators of a flag, or a subdivision flag.
 
-The click action is only the intent's `https://` link, which the core validated and routed under the entry's `link_prefix` (checked again here). No other URL, from the text or anywhere else, becomes a click target. An `obsidian://` link is not used as the click action yet (story #4); the push is sent without one, and `details.click` says `dropped`.
+The click action is only the intent's `https://` link, which the core validated and routed under the entry's `link_prefix` (checked again here). No other URL, from the text or anywhere else, becomes a click target. An `obsidian://` link is the click action too (it opens the note in the Obsidian app) when the entry's `link_prefix` is an `obsidian://` prefix and the link is under it (a link outside it is refused, `intent_invalid`). With an `https://` `link_prefix` an `obsidian://` link is not sent: the push goes out without a click and `details.click` says `dropped`.
 
-**JSON API, not headers.** The plugin posts `{"topic", "message", "title", "priority", "tags", "click", "delay", "sequence_id"}` to `https://<server>/` instead of `POST /<topic>` with `Title:` / `Tags:` headers: HTTP headers carry Latin-1 at best and a line break in them is header injection, while a JSON body carries any UTF-8 text as data.
+**JSON API, not headers.** The plugin posts `{"topic", "message", "title", "priority", "tags", "click", "actions", "delay", "sequence_id"}` to `https://<server>/` instead of `POST /<topic>` with `Title:` / `Tags:` headers: HTTP headers carry Latin-1 at best and a line break in them is header injection, while a JSON body carries any UTF-8 text as data.
+
+### Action buttons (Done / Snooze)
+
+How a tap changes the vault, end to end:
+
+1. A pipeline step proposes a `notify.push` with `actions` (the core's `/act` feature, horae#115). The core mints one signed, single-use link per button (labels: Done, Snooze 1h, Snooze 3h, Tomorrow) and passes them to this plugin in `ApplyRequest.actions`, as ntfy `http` actions. This needs, in `horae.yaml`, `http.public_url` (an `https://` URL the phone can reach: the links are built from it, nothing else) and the `HORAE_ACT_KEY` secret that signs them, and the route's `mode: tasks`.
+2. The plugin re-checks each button (`http`, `POST`, an `https://` URL of at most 2048 characters with no user info, a plain-text label of at most 40 characters), keeps at most three (ntfy's limit) and sends them in the JSON publish as `actions`: `{"action": "http", "label", "url", "method": "POST"}`.
+3. Tapping a button makes the ntfy app POST the link to the core's `/act`, which applies the change to the task note (the vault updates on the next sync).
+
+Each URL is a bearer credential: the plugin never writes it to a log, an error or `details` (`details.actions` is only the number of buttons sent). Anyone who can read the push (the ntfy server, a topic readable by others) can use the links until they expire or are used once: keep the topic private (`auth: token`). No new network host or secret is needed: the buttons are called by the phone, not by the plugin.
+
+**If a phone's http actions do not work** (an iOS ntfy app that does not run the POST in the background, or a restricted network), set `actions: view` on the entry: the buttons then open the core's confirmation page in the browser, where one more tap applies the change. `actions: off` sends no buttons.
+
+**What the maintainer must check on a phone** (not testable here): (a) on iOS and Android, tapping Done on a received push calls `/act` (the task note changes, and a second tap on the same button is refused as used); (b) the same for a Snooze; (c) with `actions: view`, the button opens the confirmation page; (d) an `obsidian://` click on the notification opens the note in the Obsidian app (with `link_prefix: obsidian://<vault>/...`); (e) the phone can reach `http.public_url`.
 
 ### Your own server
 
@@ -152,7 +167,7 @@ The HTTP client ignores the environment (`trust_env=False`: no proxy, `.netrc` o
 
 ### What `apply` returns
 
-`{"target": "<server>/<topic>", "after_sha256": null, "details": {...}}`, with `details.delivery` (`sent`, `delayed`, `dropped` or `duplicate`), `details.priority`, the ntfy message `id` when the server returns one, `until` (UTC, by Horae's clock) for a delayed push, `click: "dropped"` when an `obsidian://` link was not sent, and `state` (`reset`, `evicted` or `not_saved`) when the reminder state file was started over, had to drop a live entry to stay bounded, or could not be written. The core journals the notification (not undoable) and records its `dedupe_key`.
+`{"target": "<server>/<topic>", "after_sha256": null, "details": {...}}`, with `details.delivery` (`sent`, `delayed`, `dropped` or `duplicate`), `details.priority`, the ntfy message `id` when the server returns one, `until` (UTC, by Horae's clock) for a delayed push, `click: "dropped"` when an `obsidian://` link was not sent, `actions` (the number of buttons sent), and `state` (`reset`, `evicted` or `not_saved`) when the reminder state file was started over, had to drop a live entry to stay bounded, or could not be written. The core journals the notification (not undoable) and records its `dedupe_key`.
 
 ## Permissions
 

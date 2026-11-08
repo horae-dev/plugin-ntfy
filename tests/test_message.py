@@ -12,6 +12,7 @@ from horae_ntfy.message import (
     EMPTY_BODY,
     MAX_BODY_BYTES,
     MAX_TITLE,
+    action_buttons,
     body_text,
     click_url,
     payload,
@@ -130,7 +131,7 @@ def test_an_https_link_under_the_prefix_is_the_click_action() -> None:
     assert payload(push(link=link), SETTINGS, delay_s=None)["click"] == link
 
 
-def test_an_obsidian_link_is_left_for_story_4() -> None:
+def test_an_obsidian_link_is_not_clicked_under_an_https_prefix() -> None:
     link = "obsidian://open?file=Daily%2F2026-10-27.assistant.md"
     assert "click" not in payload(push(link=link), SETTINGS, delay_s=None)
     assert click_url(link, SETTINGS) is None
@@ -229,3 +230,82 @@ def test_a_cut_never_pairs_regional_indicators_wrongly() -> None:
     assert cut == "x" + flags[: 124 * 2] + "…"
     body = body_text("\U0001f1eb\U0001f1f7" * 2000)
     assert body.removesuffix("…") == "\U0001f1eb\U0001f1f7" * ((len(body) - 1) // 2)
+
+
+OBSIDIAN = parse(
+    {"server": "https://ntfy.example.org", "topic": "t", "link_prefix": "obsidian://vault/daily/"}
+)
+SECRET = "https://horae.example.org/act/SECRETTOKEN123"  # noqa: S105 - synthetic
+
+
+def button(**fields: Any) -> dict[str, str]:
+    return {"action": "http", "label": "Done", "url": SECRET, "method": "POST", **fields}
+
+
+def test_an_obsidian_link_under_an_obsidian_prefix_is_the_click_action() -> None:
+    link = "obsidian://vault/daily/2026-10-29"
+    assert payload(push(link=link), OBSIDIAN, delay_s=None)["click"] == link
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        "obsidian://other/daily/x",
+        "obsidian://vault/other/x",
+        "obsidian://vault/daily/../x",
+        "obsidian://user@vault/daily/x",
+        "obsidian://vault/daily/x y",
+        "https://notes.example.org/daily/x",
+    ],
+)
+def test_an_obsidian_prefix_refuses_other_links(link: str) -> None:
+    with pytest.raises(SinkError) as error:
+        click_url(link, OBSIDIAN)
+    assert error.value.kind == "intent_invalid"
+
+
+def test_buttons_become_ntfy_http_actions() -> None:
+    message = payload(push(), SETTINGS, delay_s=None, actions=[button()])
+    assert message["actions"] == [button()]
+
+
+def test_view_mode_sends_view_actions() -> None:
+    view = parse({"server": "https://ntfy.example.org", "topic": "t", "actions": "view"})
+    assert action_buttons([button()], view) == [{"action": "view", "label": "Done", "url": SECRET}]
+
+
+def test_off_mode_sends_none() -> None:
+    off = parse({"server": "https://ntfy.example.org", "topic": "t", "actions": "off"})
+    assert action_buttons([button()], off) == []
+    assert "actions" not in payload(push(), off, delay_s=None, actions=[button()])
+
+
+def test_more_than_three_buttons_are_truncated() -> None:
+    many = [button(label=f"B{i}") for i in range(5)]
+    assert [b["label"] for b in action_buttons(many, SETTINGS)] == ["B0", "B1", "B2"]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        button(action="view"),
+        button(method="GET"),
+        button(url="http://horae.example.org/act/x"),
+        button(url="https://user@horae.example.org/act/x"),
+        button(url="https://horae.example.org/act/x y"),
+        button(url="https://horae.example.org/" + "a" * 2048),
+        button(url="https:///act/x"),
+        button(label=""),
+        button(label="x" * 41),
+        button(label="a\nb"),
+        button(label="a\u202eb"),
+        button(label=3),
+        "not an object",
+    ],
+)
+def test_a_bad_button_is_refused_without_its_url(bad: object) -> None:
+    with pytest.raises(SinkError) as error:
+        action_buttons([bad], SETTINGS)
+    assert error.value.kind == "intent_invalid"
+    assert "://" not in str(error.value)
+    assert "SECRET" not in str(error.value)

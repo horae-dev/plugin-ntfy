@@ -45,6 +45,7 @@ def replay(case: dict[str, Any]) -> dict[str, Any]:
         "run_id": "run-synthetic",
         "index": 0,
         "dedupe_key": "0" * 64,
+        "actions": case.get("actions", []),
     }
     result = anyio.run(operation, plugin, f"{TOOL.split('.')[0]}.apply", arguments)
     request: dict[str, Any] | None = None
@@ -59,6 +60,7 @@ def replay(case: dict[str, Any]) -> dict[str, Any]:
 def test_recorded_push(case: dict[str, Any]) -> None:
     actual = replay(case)
     assert TOKEN not in json.dumps(actual)
+    assert "synthetic-token" not in json.dumps(actual["result"])  # button URLs: request only
     if recording():
         case["expect"] = actual
         return

@@ -297,14 +297,102 @@ def test_a_delayed_push_keeps_its_sequence_id(ntfy: FakeNtfy) -> None:
     assert ntfy.seen[0].json()["sequence_id"] == rule_sequence(params)
 
 
-def test_an_obsidian_link_is_reported_as_a_dropped_click(ntfy: FakeNtfy) -> None:
+def test_an_obsidian_link_under_an_https_prefix_is_reported_as_a_dropped_click(
+    ntfy: FakeNtfy,
+) -> None:
+    applied = apply(
+        lan_notifier(),
+        {"server": ntfy.url, "topic": "t", "link_prefix": "https://notes.example.org/daily/"},
+        link="obsidian://vault/daily/2026-10-29",
+    )
+    assert "click" not in ntfy.seen[0].json()
+    assert applied.details["click"] == "dropped"
+
+
+def test_an_obsidian_link_is_the_click_action_under_an_obsidian_prefix(ntfy: FakeNtfy) -> None:
     applied = apply(
         lan_notifier(),
         {"server": ntfy.url, "topic": "t", "link_prefix": "obsidian://vault/daily/"},
         link="obsidian://vault/daily/2026-10-29",
     )
-    assert "click" not in ntfy.seen[0].json()
-    assert applied.details["click"] == "dropped"
+    assert ntfy.seen[0].json()["click"] == "obsidian://vault/daily/2026-10-29"
+    assert "click" not in applied.details
+
+
+def test_an_obsidian_link_outside_its_prefix_is_refused(ntfy: FakeNtfy) -> None:
+    with pytest.raises(SinkError) as error:
+        apply(
+            lan_notifier(),
+            {"server": ntfy.url, "topic": "t", "link_prefix": "obsidian://vault/daily/"},
+            link="obsidian://vault/private/x",
+        )
+    assert error.value.kind == "intent_invalid"
+    assert ntfy.seen == []
+
+
+MINTED = "https://horae.example.org/act/SECRETTOKEN"
+
+
+def minted(count: int = 3) -> tuple[dict[str, str], ...]:
+    labels = ["Done", "Snooze 1h", "Snooze 3h", "Tomorrow"]
+    return tuple(
+        {"action": "http", "label": labels[i % 4], "url": f"{MINTED}{i}", "method": "POST"}
+        for i in range(count)
+    )
+
+
+def apply_with_actions(
+    notifier: NtfyNotifier, params: dict[str, Any], actions: tuple[dict[str, str], ...]
+) -> Applied:
+    call = dataclasses.replace(request(params), actions=actions)
+    return anyio.run(notifier.apply, call)
+
+
+def test_the_fake_server_receives_the_minted_buttons_as_http_actions(ntfy: FakeNtfy) -> None:
+    applied = apply_with_actions(lan_notifier(), {"server": ntfy.url, "topic": "t"}, minted())
+    assert ntfy.seen[0].json()["actions"] == list(minted())
+    assert applied.details["actions"] == 3
+    assert "SECRETTOKEN" not in repr(applied)
+
+
+def test_view_mode_sends_view_actions_and_off_sends_none(ntfy: FakeNtfy) -> None:
+    apply_with_actions(
+        lan_notifier(), {"server": ntfy.url, "topic": "t", "actions": "view"}, minted(1)
+    )
+    assert ntfy.seen[0].json()["actions"] == [
+        {"action": "view", "label": "Done", "url": f"{MINTED}0"}
+    ]
+    applied = apply_with_actions(
+        lan_notifier(), {"server": ntfy.url, "topic": "u", "actions": "off"}, minted()
+    )
+    assert "actions" not in ntfy.seen[1].json()
+    assert "actions" not in applied.details
+
+
+def test_more_than_three_buttons_send_three(ntfy: FakeNtfy) -> None:
+    applied = apply_with_actions(lan_notifier(), {"server": ntfy.url, "topic": "t"}, minted(5))
+    assert len(ntfy.seen[0].json()["actions"]) == 3
+    assert applied.details["actions"] == 3
+
+
+def test_a_bad_button_refuses_the_push_and_its_url_is_not_logged(
+    ntfy: FakeNtfy, caplog: pytest.LogCaptureFixture, capfd: pytest.CaptureFixture[str]
+) -> None:
+    bad = ({"action": "http", "label": "Done", "url": "http://h/SECRETTOKEN", "method": "POST"},)
+    with caplog.at_level("DEBUG"), pytest.raises(SinkError) as error:
+        apply_with_actions(lan_notifier(), {"server": ntfy.url, "topic": "t"}, bad)
+    assert error.value.kind == "intent_invalid"
+    assert ntfy.seen == []
+    assert "SECRETTOKEN" not in str(error.value) + caplog.text + "".join(capfd.readouterr())
+
+
+def test_a_refused_publish_does_not_leak_the_button_urls(
+    ntfy: FakeNtfy, caplog: pytest.LogCaptureFixture
+) -> None:
+    ntfy.behaviour = Behaviour(status=400, body=b'{"error":"bad"}')
+    with caplog.at_level("DEBUG"), pytest.raises(SinkError) as error:
+        apply_with_actions(lan_notifier(), {"server": ntfy.url, "topic": "t"}, minted())
+    assert "SECRETTOKEN" not in str(error.value) + caplog.text
 
 
 @pytest.mark.parametrize("during", ["delay", "drop"])
