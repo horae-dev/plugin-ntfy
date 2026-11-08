@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+- Done / Snooze buttons: the buttons the core mints for a `notify.push` (`ApplyRequest.actions`,
+  horae-sdk 0.3) are sent as ntfy `http` actions (at most 3, each re-checked; the URLs are
+  credentials and never logged). New entry parameter `actions: http | view | off` (default
+  `http`); `view` is the documented fallback if a phone's http actions do not work.
+- An `obsidian://` link is the click action when `link_prefix` is an `obsidian://` prefix and the
+  link is under it (outside it: `intent_invalid`); with an `https://` prefix it is still not
+  sent (`details.click: dropped`).
+- `details.actions`: the number of buttons sent. Requires horae-sdk 0.3.
+
 ## 0.2.0 (unreleased)
 
 **Breaking:** `dedupe: daily` is the default, and it needs a state directory approved for the

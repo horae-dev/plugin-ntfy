@@ -23,6 +23,7 @@ def test_defaults() -> None:
     assert settings.quiet_hours is None
     assert settings.link_prefix is None
     assert settings.dedupe == "daily"
+    assert settings.actions == "http"
     assert not settings.critical
 
 
@@ -143,6 +144,8 @@ def test_invalid_servers_are_refused(server: Any) -> None:
         ),
         ({**SERVER, "topic": "t", "dedupe": "hourly"}, "dedupe"),
         ({**SERVER, "topic": "t", "dedupe": False}, "dedupe"),
+        ({**SERVER, "topic": "t", "actions": "click"}, "actions"),
+        ({**SERVER, "topic": "t", "actions": True}, "actions"),
     ],
 )
 def test_invalid_parameters_are_refused_by_name(params: dict[str, Any], name: str) -> None:

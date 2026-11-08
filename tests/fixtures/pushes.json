@@ -210,12 +210,12 @@
     }
   },
   {
-    "name": "obsidian-link-left-for-story-4",
+    "name": "obsidian-link-under-https-prefix-dropped",
     "now": "2026-10-29T12:00:00+00:00",
     "params": {
       "server": "https://ntfy.example.org",
       "topic": "horae-digest",
-      "link_prefix": "obsidian://vault/Daily/"
+      "link_prefix": "https://notes.example.org/daily/"
     },
     "intent": {
       "type": "notify.push",
@@ -292,6 +292,60 @@
         "error": {
           "kind": "config_invalid",
           "message": "ntfy.push parameter 'quiet_hour': unknown parameter"
+        }
+      }
+    }
+  },
+  {
+    "name": "obsidian-click-and-buttons",
+    "now": "2026-10-29T12:00:00+00:00",
+    "params": {
+      "server": "https://ntfy.example.org",
+      "topic": "horae-digest",
+      "link_prefix": "obsidian://vault/Daily/"
+    },
+    "intent": {
+      "type": "notify.push",
+      "title": "Today",
+      "body": "Open the note",
+      "link": "obsidian://vault/Daily/2026-10-29.assistant.md"
+    },
+    "actions": [
+      {
+        "action": "http",
+        "label": "Done",
+        "url": "https://horae.example.org/act/synthetic-token",
+        "method": "POST"
+      }
+    ],
+    "expect": {
+      "request": {
+        "url": "https://ntfy.example.org/",
+        "json": {
+          "topic": "horae-digest",
+          "message": "Open the note",
+          "priority": 3,
+          "title": "Today",
+          "click": "obsidian://vault/Daily/2026-10-29.assistant.md",
+          "actions": [
+            {
+              "action": "http",
+              "label": "Done",
+              "url": "https://horae.example.org/act/synthetic-token",
+              "method": "POST"
+            }
+          ],
+          "sequence_id": "37c8775d31d27adf32c62cb58bbc3203"
+        }
+      },
+      "result": {
+        "target": "https://ntfy.example.org/horae-digest",
+        "after_sha256": null,
+        "details": {
+          "delivery": "sent",
+          "priority": 3,
+          "actions": 1,
+          "id": "Zz99"
         }
       }
     }
