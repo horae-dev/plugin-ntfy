@@ -34,7 +34,8 @@ def test_serves_over_stdio() -> None:
     the operations); a misconfigured entry answers an error object, without any network."""
     tools, identity, refused = anyio.run(serve_and_call)
     assert tools == {
-        f"{NAME}.{op}" for op in ("apply", "identity", "read", "restore", "parent_exists")
+        f"{NAME}.{op}"
+        for op in ("apply", "identity", "read", "restore", "restore_status", "parent_exists")
     }
     assert identity == {"identity": NAME}
     assert refused["error"]["kind"] == "config_invalid"

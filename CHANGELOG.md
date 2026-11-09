@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.1
+
+- Requires horae-sdk 0.4, which also lists the `ntfy.restore_status` sink operation (core
+  #148). Found by the marketplace nightly run against core main.
+
+## 0.3.0
 
 - A `notify.push` with a `key` (core #137) uses the core's day-scoped `dedupe_key`: the plugin keeps
   no reminder state for it (`dedupe: daily` still applies to unkeyed pushes) and derives ntfy's

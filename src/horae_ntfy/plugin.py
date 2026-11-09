@@ -83,7 +83,7 @@ from horae_ntfy.state import (
 
 NAME = "ntfy"
 """The plugin's name, also the namespace of its refs (`ntfy.push`)."""
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 TOOL = f"{NAME}.push"
 COMMAND = ["python3", "-m", "horae_ntfy"]
 """`runtime.command` of `plugin.yaml`. When installing, pin an absolute interpreter that has

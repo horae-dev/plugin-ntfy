@@ -421,7 +421,7 @@ wheels = [
 
 [[package]]
 name = "horae-plugin-ntfy"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "horae-sdk" },
@@ -460,8 +460,8 @@ dev = [
 
 [[package]]
 name = "horae-sdk"
-version = "0.3.0"
-source = { git = "https://github.com/horae-dev/horae?subdirectory=sdk&branch=main#648ddb0a21c5998ae84f30200923758dda32d80e" }
+version = "0.4.0"
+source = { git = "https://github.com/horae-dev/horae?subdirectory=sdk&branch=main#aa90f21218f34a07a0d4d2b59511871e8fdee957" }
 dependencies = [
     { name = "anyio" },
     { name = "mcp" },
