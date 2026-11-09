@@ -83,7 +83,7 @@ from horae_ntfy.state import (
 
 NAME = "ntfy"
 """The plugin's name, also the namespace of its refs (`ntfy.push`)."""
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 TOOL = f"{NAME}.push"
 COMMAND = ["python3", "-m", "horae_ntfy"]
 """`runtime.command` of `plugin.yaml`. When installing, pin an absolute interpreter that has
@@ -94,7 +94,8 @@ PERMISSIONS = Permissions(
     secrets=[TOKEN_SECRET],
 )
 """`notify.push` (applied, never proposed), the default public server `ntfy.sh` and the access
-token. A self-hosted server's host is approved in `horae.lock` (README, "Your own server")."""
+token. A self-hosted server's host is approved in `horae.lock` (README, "Your own server"); `apply`
+refuses a server whose host is not in the approved list the core sends (horae-sdk 0.5)."""
 MIN_DELAY = timedelta(seconds=30)
 """ntfy refuses a scheduled delivery less than ten seconds ahead (its default minimum); 30 s
 leaves a margin for the time the request takes and for the two clocks counting it."""
@@ -142,10 +143,24 @@ class NtfyNotifier(Notifier):
             raise SinkError("secret_invalid", f"{TOKEN_SECRET} is not a valid access token")
         return token
 
+    @staticmethod
+    def _check_approved(request: ApplyRequest, settings: Settings) -> None:
+        """Refuses a server whose host `horae.lock` does not approve (horae-sdk 0.5), before
+        anything is read or sent. The check is on the host: an approved name also covers the
+        LAN `http://` form of that server (the lock matches `https` URLs only). `None` is an
+        older core that sent no list: the configured server stays trusted, as before."""
+        if request.host_allowed(f"https://{settings.host}") is False:
+            raise SinkError(
+                "config_invalid",
+                f"ntfy.push parameter server: host {settings.host} is not approved in horae.lock "
+                "(permissions.network); nothing was sent",
+            )
+
     async def apply(self, request: ApplyRequest) -> Applied:
         if request.intent.get("type") != "notify.push":
             raise SinkError("not_supported", f"{TOOL} applies notify.push intents only")
         settings = parse(request.params)
+        self._check_approved(request, settings)
         token = self._token(settings)
         target = f"{settings.server}/{settings.topic}"
         details: dict[str, Any] = {"delivery": "sent", "priority": settings.ntfy_priority}

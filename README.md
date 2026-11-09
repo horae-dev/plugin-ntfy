@@ -136,7 +136,7 @@ plugins:
       intents: [notify.push]
 ```
 
-**The plugin cannot check `server` against the approved hosts**: a sink is not given the lock's `permissions.network`. Until the core enforces egress (M5), the `server` is trusted pipeline configuration like the rest of the entry: whoever edits the pipeline decides where the notification, and the token, go. (A core follow-up would pass the locked network list in the apply request so a plugin can refuse an undeclared host.) Until M5 nothing enforces network permissions (first-party plugins only). From M5 the egress proxy will enforce them and is planned to refuse names that resolve to private addresses (core threat row T07, #50), which a server on your LAN or Docker network would hit; the reference deployment (self-hosted ntfy beside Horae) will need an answer there.
+**The plugin refuses a `server` whose host is not approved.** The core (horae#156) sends the `permissions.network` approved in `horae.lock` with every apply, and `ntfy.apply` fails with `config_invalid`, naming the host, before reading the token or contacting the server, when the host is not in that list (a `http://` LAN server is matched by its host name too). An older core sends no list; the plugin then trusts the configured `server`, like the rest of the entry, as it did before. Until M5 nothing else enforces network permissions (first-party plugins only). From M5 the egress proxy will enforce them and is planned to refuse names that resolve to private addresses (core threat row T07, #50), which a server on your LAN or Docker network would hit; the reference deployment (self-hosted ntfy beside Horae) will need an answer there.
 
 ### Failures
 

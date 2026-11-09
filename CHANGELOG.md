@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2
+
+- Refuses a server whose host `horae.lock` does not approve (horae-sdk 0.5, core #156): `apply`
+  fails with `config_invalid` naming the host, before the token is read or the server contacted.
+  An older core that sends no list keeps today's behaviour (the configured server is trusted).
+  Requires horae-sdk 0.5.
+
 ## 0.3.1
 
 - Requires horae-sdk 0.4, which also lists the `ntfy.restore_status` sink operation (core

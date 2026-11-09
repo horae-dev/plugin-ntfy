@@ -26,9 +26,10 @@ the core's rule (`check_link_prefix`) and the notifier checks the link against i
 
 **Server.** With `auth: token` the `server` is **required**: the token is never sent to a
 default host the pipeline author did not write down. Only `auth: none` defaults to
-`https://ntfy.sh`. The plugin cannot see the network permissions approved in `horae.lock`,
-so until the core enforces egress (M5) the configured server is trusted pipeline
-configuration, like the rest of the entry.
+`https://ntfy.sh`. `apply` checks the server's host against the network permissions approved in
+`horae.lock` (the core sends them, horae-sdk 0.5) and refuses one that is not approved; with
+an older core that sends no list, the configured server is trusted pipeline configuration,
+like the rest of the entry.
 
 **Server URL.** `https://<host>[:port]` with no path, query, fragment or user info. The host is a
 lowercase DNS name as `permissions.network` writes it (no IP literal, no `localhost`). An
