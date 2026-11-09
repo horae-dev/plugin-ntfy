@@ -11,6 +11,7 @@ what the core gets back (`result`). `HORAE_SDK_RECORD=1 uv run pytest` rewrites 
 import json
 import os
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +48,12 @@ def replay(case: dict[str, Any]) -> dict[str, Any]:
         "dedupe_key": "0" * 64,
         "actions": case.get("actions", []),
     }
-    result = anyio.run(operation, plugin, f"{TOOL.split('.')[0]}.apply", arguments)
+    result = anyio.run(
+        partial(operation, network=["ntfy.example.org"]),
+        plugin,
+        f"{TOOL.split('.')[0]}.apply",
+        arguments,
+    )
     request: dict[str, Any] | None = None
     if recorder.requests:
         [sent] = recorder.requests
