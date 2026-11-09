@@ -26,7 +26,7 @@ Horae plugin: push notifications through ntfy, with digests, reminders, quiet ho
 
 | Parameter | Meaning |
 |---|---|
-| `server` | **Required with `auth: token`** (the token is never sent to a default host nobody wrote down); only `auth: none` defaults to `https://ntfy.sh`. `https://<host>[:port]`, no path, query, fragment or user info; the host is a lowercase DNS name (no IP literal, no `localhost`). `http://<host>[:port]` is accepted for a server **on the LAN only**: the host is resolved when connecting and refused unless every address is loopback, RFC 1918 or IPv6 ULA (the rule the core applies to an `http://` LLM endpoint). The token then travels unencrypted on that network: prefer `https`. |
+| `server` | **Required with `auth: token`** (the token is never sent to a default host nobody wrote down); only `auth: none` defaults to `https://ntfy.sh`. `https://<host>[:port]`, no path, query, fragment or user info; the host is a lowercase DNS name (no IP literal, no `localhost`). `http://<host>[:port]` is accepted for a server **on the LAN only**, and only when its exact `host:port` is approved in `permissions.network_local` in `horae.lock` (see "Your own server"; port 80 when the URL has none). The host is also resolved when connecting and refused unless every address is loopback, RFC 1918 or IPv6 ULA (the rule the core applies to an `http://` LLM endpoint). The token then travels unencrypted on that network: prefer `https`. |
 | `topic` | The ntfy topic. It is not a secret: it is stored in run records. **On a public server such as ntfy.sh, a topic name acts like a weak password**: anyone who guesses it can subscribe to it (read your notifications) or publish to it, unless it is reserved and protected with access control (an account and ACLs, or a self-hosted server with `auth-default-access: deny-all`). Choose a long, unguessable name if you cannot protect it. |
 | `priority` | Mapped to ntfy's 1 to 5: `min` 1, `low` 2, `normal` 3, `high` 4, `critical` 5. Only `critical` bypasses quiet hours. The intent has no priority: it is the entry's (trusted) choice, so use a separate pipeline for critical alerts (two `notify` entries that both take `notify.push` make every push ambiguous for the core). |
 | `tags` | ntfy tags; a tag that is an emoji short code shows as that emoji. |
@@ -136,7 +136,28 @@ plugins:
       intents: [notify.push]
 ```
 
-**The plugin refuses a `server` whose host is not approved.** The core (horae#156) sends the `permissions.network` approved in `horae.lock` with every apply, and `ntfy.apply` fails with `config_invalid`, naming the host, before reading the token or contacting the server, when the host is not in that list (a `http://` LAN server is matched by its host name too). An older core sends no list; the plugin then trusts the configured `server`, like the rest of the entry, as it did before. Until M5 nothing else enforces network permissions (first-party plugins only). From M5 the egress proxy will enforce them and is planned to refuse names that resolve to private addresses (core threat row T07, #50), which a server on your LAN or Docker network would hit; the reference deployment (self-hosted ntfy beside Horae) will need an answer there.
+**A self-hosted ntfy on your LAN over `http://`** is approved under `network_local` (horae-sdk 0.6, decision 66), as an exact `host:port`: a lowercase `.local`, `.lan`, `.internal` or `.home.arpa` name with a port (80 for `http://ntfy.lan`, 8080 for `http://ntfy.lan:8080`):
+
+```yaml
+# horae.lock (excerpt)
+plugins:
+  ntfy:
+    permissions:
+      network_local: [ntfy.lan:80]
+      secrets: [NTFY_TOKEN]
+      intents: [notify.push]
+```
+
+```yaml
+- notify:
+    - ntfy.push:
+        server: http://ntfy.lan
+        topic: reminders
+```
+
+`http://` is never accepted for a public host, and not for a LAN host without the exact grant: another port, another name or a look-alike (`ntfy.lan.evil.example.org`) is refused (`config_invalid`) before the token is read or anything is sent. With a core older than 0.6 (no list), the configured server is trusted as before. The connection checks stay: an `http://` host must resolve only to loopback, RFC 1918 or IPv6 ULA addresses (link-local and cloud metadata addresses are refused), and `https` is required for public servers.
+
+**The plugin refuses a `server` whose host is not approved.** The core (horae#156) sends the `permissions.network` approved in `horae.lock` with every apply, and `ntfy.apply` fails with `config_invalid`, naming the host, before reading the token or contacting the server, when the host is not in that list (an `https` server by its host name, any port, or by an exact `host:port` in `network_local`). An older core sends no list; the plugin then trusts the configured `server`, like the rest of the entry, as it did before. Until M5 nothing else enforces network permissions (first-party plugins only). From M5 the egress proxy will enforce them and is planned to refuse names that resolve to private addresses (core threat row T07, #50), which a server on your LAN or Docker network would hit; the reference deployment (self-hosted ntfy beside Horae) will need an answer there.
 
 ### Failures
 
@@ -176,7 +197,7 @@ The HTTP client ignores the environment (`trust_env=False`: no proxy, `.netrc` o
 | Permission | Value | Why |
 |---|---|---|
 | intent | `notify.push` | the intent type this notifier applies (it proposes none) |
-| network | `ntfy.sh` | the default server; a self-hosted host is approved in `horae.lock` (above) |
+| network | `ntfy.sh` | the default server; a self-hosted host is approved in `horae.lock` (above): `network`, or `network_local` for a LAN `http://` server |
 | secret | `NTFY_TOKEN` | the ntfy access token, sent as `Authorization: Bearer` (`auth: token`); one token for every `ntfy.push` entry for now (per-entry tokens need core support) |
 | paths | none in the manifest; **one `paths.write` directory approved in `horae.lock`** | the reminder state (`dedupe: daily`); the path is the instance's, so the lock grants it ([Reminder state](#reminder-state)) |
 

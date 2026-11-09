@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.3
+
+- A self-hosted LAN ntfy over `http://` is approved through `permissions.network_local`
+  (horae-sdk 0.6, decision 66), for example `ntfy.lan:80`. An `http://` server is accepted only
+  when `host_allowed` matches an exact local grant (port 80 when the URL has none); another
+  port, another name or a public host is refused (`config_invalid`) before the token is read.
+  `https` stays required for public servers (and may also use a local grant). `None` (an older
+  core) keeps the configured server trusted. The resolved-address LAN check (loopback, RFC 1918,
+  ULA; link-local and metadata refused) is unchanged.
+- Requires `horae-sdk>=0.6,<0.7`.
+
 ## 0.3.2
 
 - Refuses a server whose host `horae.lock` does not approve (horae-sdk 0.5, core #156): `apply`
