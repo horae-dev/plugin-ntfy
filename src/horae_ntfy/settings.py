@@ -29,13 +29,15 @@ default host the pipeline author did not write down. Only `auth: none` defaults 
 `https://ntfy.sh`. `apply` checks the server's host against the network permissions approved in
 `horae.lock` (the core sends them, horae-sdk 0.5) and refuses one that is not approved; with
 an older core that sends no list, the configured server is trusted pipeline configuration,
-like the rest of the entry.
+like the rest of the entry. An `http://` server is approved only by an exact `host:port` in
+`permissions.network_local` (horae-sdk 0.6, decision 66; `ntfy.lan:80` for `http://ntfy.lan`).
 
 **Server URL.** `https://<host>[:port]` with no path, query, fragment or user info. The host is a
 lowercase DNS name as `permissions.network` writes it (no IP literal, no `localhost`). An
-`http://` server is accepted only for the LAN: the connection is refused unless the host
-resolves to loopback, RFC 1918 or IPv6 ULA addresses (`horae_ntfy.http`), the rule the core
-applies to an `http://` LLM endpoint. The token then travels in clear on that network.
+`http://` server is accepted only for the LAN, and only on a `network_local` grant: the
+connection is refused unless the host resolves to loopback, RFC 1918 or IPv6 ULA addresses
+(`horae_ntfy.http`), the rule the core applies to an `http://` LLM endpoint. The token then
+travels in clear on that network.
 """
 
 import re
@@ -118,6 +120,10 @@ class Settings:
     @property
     def critical(self) -> bool:
         return self.priority == CRITICAL
+
+
+LOCAL_SUFFIXES = (".local", ".lan", ".internal", ".home.arpa")
+"""The name suffixes of a `network_local` host (schemas decision 66 B)."""
 
 
 def _server(value: object) -> tuple[str, Literal["https", "http"], str]:

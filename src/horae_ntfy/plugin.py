@@ -71,7 +71,13 @@ from horae_sdk import Applied, ApplyRequest, Notifier, Paths, Permissions, Plugi
 from horae_ntfy.http import Publisher
 from horae_ntfy.message import is_obsidian, payload
 from horae_ntfy.quiet import is_quiet, quiet_until, zone_from_env
-from horae_ntfy.settings import DEFAULT_SERVER, TOKEN_SECRET, Settings, parse
+from horae_ntfy.settings import (
+    DEFAULT_SERVER,
+    LOCAL_SUFFIXES,
+    TOKEN_SECRET,
+    Settings,
+    parse,
+)
 from horae_ntfy.state import (
     LOCK_TIMEOUT_S,
     SentState,
@@ -83,7 +89,7 @@ from horae_ntfy.state import (
 
 NAME = "ntfy"
 """The plugin's name, also the namespace of its refs (`ntfy.push`)."""
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 TOOL = f"{NAME}.push"
 COMMAND = ["python3", "-m", "horae_ntfy"]
 """`runtime.command` of `plugin.yaml`. When installing, pin an absolute interpreter that has
@@ -95,7 +101,9 @@ PERMISSIONS = Permissions(
 )
 """`notify.push` (applied, never proposed), the default public server `ntfy.sh` and the access
 token. A self-hosted server's host is approved in `horae.lock` (README, "Your own server"); `apply`
-refuses a server whose host is not in the approved list the core sends (horae-sdk 0.5)."""
+refuses a server whose host is not in the approved list the core sends (horae-sdk 0.5). A LAN
+server over `http://` is approved as `host:port` in `permissions.network_local` (horae-sdk 0.6),
+for example `ntfy.lan:80`."""
 MIN_DELAY = timedelta(seconds=30)
 """ntfy refuses a scheduled delivery less than ten seconds ahead (its default minimum); 30 s
 leaves a margin for the time the request takes and for the two clocks counting it."""
@@ -145,15 +153,30 @@ class NtfyNotifier(Notifier):
 
     @staticmethod
     def _check_approved(request: ApplyRequest, settings: Settings) -> None:
-        """Refuses a server whose host `horae.lock` does not approve (horae-sdk 0.5), before
-        anything is read or sent. The check is on the host: an approved name also covers the
-        LAN `http://` form of that server (the lock matches `https` URLs only). `None` is an
-        older core that sent no list: the configured server stays trusted, as before."""
-        if request.host_allowed(f"https://{settings.host}") is False:
+        """Refuses a server `horae.lock` does not approve, before anything is read or sent.
+
+        An `https` server: its host in `permissions.network` (any port), or its exact
+        `host:port` in `permissions.network_local`. An `http` server: only an exact
+        `permissions.network_local` grant (horae-sdk 0.6, decision 66), asked with the explicit
+        port (80 when the URL has none). `None` is an older core that sent no list: the
+        configured server stays trusted, as before (the LAN-only connection check of
+        `horae_ntfy.http` still applies to `http`)."""
+        if settings.scheme == "http" or settings.host.endswith(LOCAL_SUFFIXES):
+            # asked with the explicit port, so only an exact `network_local` entry (or an
+            # approved name, any port) matches: `https://ntfy.lan` alone would mean port 443
+            verdict = request.host_allowed(settings.server)
+        else:
+            verdict = request.host_allowed(f"https://{settings.host}")
+        if verdict is False:
+            where = (
+                "permissions.network_local; http:// is allowed only on an exact host:port there"
+                if settings.scheme == "http"
+                else "permissions.network or network_local"
+            )
             raise SinkError(
                 "config_invalid",
-                f"ntfy.push parameter server: host {settings.host} is not approved in horae.lock "
-                "(permissions.network); nothing was sent",
+                f"ntfy.push parameter server: {settings.server.split('//', 1)[1]} is not approved "
+                f"in horae.lock ({where}); nothing was sent",
             )
 
     async def apply(self, request: ApplyRequest) -> Applied:
