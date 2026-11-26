@@ -4,7 +4,9 @@
 
 Horae plugin: push notifications through ntfy, with digests, reminders, quiet hours and action buttons.
 
-> 🚧 **In progress (M3).** `ntfy.push` sends notifications, each reminder once a day; deep links and action buttons (#4) are not built yet. Follow progress on the [Horae roadmap project](https://github.com/orgs/horae-dev/projects/1).
+**Docs:** <https://horae-dev.github.io/docs/plugins/ntfy/>
+
+> 🚧 **Early (0.3.4, listed in the [marketplace](https://github.com/horae-dev/marketplace)).** `ntfy.push` sends notifications, each reminder once a day, with deep links and Done / Snooze action buttons (#4). It runs under the process runtime only for now: under `runtime: container` it does not use the core's egress proxy yet (#16). Follow progress on the [Horae roadmap project](https://github.com/orgs/horae-dev/projects/1).
 
 ## What it does
 
@@ -157,7 +159,7 @@ plugins:
 
 `http://` is never accepted for a public host, and not for a LAN host without the exact grant: another port, another name or a look-alike (`ntfy.lan.evil.example.org`) is refused (`config_invalid`) before the token is read or anything is sent. With a core older than 0.6 (no list), the configured server is trusted as before. The connection checks stay: an `http://` host must resolve only to loopback, RFC 1918 or IPv6 ULA addresses (link-local and cloud metadata addresses are refused), and `https` is required for public servers.
 
-**The plugin refuses a `server` whose host is not approved.** The core (horae#156) sends the `permissions.network` approved in `horae.lock` with every apply, and `ntfy.apply` fails with `config_invalid`, naming the host, before reading the token or contacting the server, when the host is not in that list (an `https` server by its host name, any port, or by an exact `host:port` in `network_local`). An older core sends no list; the plugin then trusts the configured `server`, like the rest of the entry, as it did before. Until M5 nothing else enforces network permissions (first-party plugins only). From M5 the egress proxy will enforce them and is planned to refuse names that resolve to private addresses (core threat row T07, #50), which a server on your LAN or Docker network would hit; the reference deployment (self-hosted ntfy beside Horae) will need an answer there.
+**The plugin refuses a `server` whose host is not approved.** The core (horae#156) sends the `permissions.network` approved in `horae.lock` with every apply, and `ntfy.apply` fails with `config_invalid`, naming the host, before reading the token or contacting the server, when the host is not in that list (an `https` server by its host name, any port, or by an exact `host:port` in `network_local`). An older core sends no list; the plugin then trusts the configured `server`, like the rest of the entry, as it did before. Under the process runtime (first-party plugins), nothing else enforces network permissions. Under `runtime: container` the core's egress allow-list proxy enforces them (core schemas decision 76, [operator guide](https://horae-dev.github.io/docs/security/plugin-containers/#egress-the-allow-list-proxy)): it refuses a public name that resolves to a private address, but lets a LAN or Docker-network server through its exact `network_local` grant. This plugin does not route through that proxy yet (its client ignores the environment and does not pass `egress_proxy()`), so under `runtime: container` it cannot connect: [#16](https://github.com/horae-dev/plugin-ntfy/issues/16).
 
 ### Failures
 
@@ -203,7 +205,11 @@ The HTTP client ignores the environment (`trust_env=False`: no proxy, `.netrc` o
 
 ## Install
 
-Until M4's `horae plugin add`, pin the commit in `horae.lock` with the permissions above, install the package into an interpreter, and set `runtime.command` to that absolute interpreter (`["/opt/horae-plugins/ntfy/bin/python", "-m", "horae_ntfy"]`, horae-sdk README, "The command"). Give the instance an `NTFY_TOKEN` secret (an ntfy access token, `tk_…`), a `timezone` in `horae.yaml`, and approve a state directory for the plugin in `horae.lock` (`paths.write`, see [Reminder state](#reminder-state)).
+```sh
+horae plugin add ntfy@0.3.4 --allow-path /path/to/ntfy-state   # plus --allow-host ntfy.example.org, or --allow-local ntfy.lan:80, for your own server
+```
+
+`horae plugin add` shows the permissions above, approves the extra grants and pins the commit in `horae.lock`. Give the instance an `NTFY_TOKEN` secret (an ntfy access token, `tk_…`), and a `timezone` in `horae.yaml`; the state directory granted with `--allow-path` is the reminder state (`paths.write`, see [Reminder state](#reminder-state)).
 
 ## Planned work
 
